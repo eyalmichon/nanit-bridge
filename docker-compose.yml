@@ -1,0 +1,23 @@
+services:
+  nanit-bridge:
+    build: .
+    container_name: nanit-bridge
+    restart: unless-stopped
+    ports:
+      - "1935:1935"
+    volumes:
+      - nanit-data:/data
+    environment:
+      NANIT_EMAIL: "${NANIT_EMAIL}"
+      NANIT_PASSWORD: "${NANIT_PASSWORD}"
+      NANIT_RTMP_ADDR: "${NANIT_RTMP_ADDR}"    # Your LAN IP:1935, reachable by the camera
+      NANIT_RTMP_PORT: "1935"
+      NANIT_MQTT_BROKER_URL: "${NANIT_MQTT_BROKER_URL:-}"   # e.g. tcp://192.168.1.10:1883
+      NANIT_MQTT_USERNAME: "${NANIT_MQTT_USERNAME:-}"
+      NANIT_MQTT_PASSWORD: "${NANIT_MQTT_PASSWORD:-}"
+      NANIT_MQTT_PREFIX: "${NANIT_MQTT_PREFIX:-nanit}"
+      NANIT_SESSION_FILE: "/data/session.json"
+      NANIT_LOG_LEVEL: "${NANIT_LOG_LEVEL:-info}"
+
+volumes:
+  nanit-data:

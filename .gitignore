@@ -1,0 +1,5 @@
+bin/
+*.pb.go
+.env
+/data/
+.plans/

@@ -1,0 +1,29 @@
+{
+  "name": "nanit-bridge",
+  "image": "golang:1.25-bookworm",
+  "forwardPorts": [1935],
+  "portsAttributes": {
+    "1935": {
+      "label": "RTMP",
+      "protocol": "tcp",
+      "onAutoForward": "silent"
+    }
+  },
+  "appPort": ["0.0.0.0:1935:1935"],
+  "postCreateCommand": "apt-get update && apt-get install -y protobuf-compiler && go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && make setup",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.profiles.linux": {
+          "bash": {
+            "path": "/bin/bash"
+          }
+        }
+      }
+    }
+  }
+}
