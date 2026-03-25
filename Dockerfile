@@ -15,6 +15,6 @@ FROM gcr.io/distroless/static-debian12
 
 COPY --from=builder /nanit-bridge /nanit-bridge
 
-EXPOSE 1935
+EXPOSE 1935 8080
 
 ENTRYPOINT ["/nanit-bridge"]

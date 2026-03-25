@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nanit-bridge</title>
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e4e4e7;
+    --muted: #71717a;
+    --accent: #6366f1;
+    --green: #22c55e;
+    --red: #ef4444;
+    --amber: #f59e0b;
+    --blue: #3b82f6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 2rem;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2rem;
+  }
+  header h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; }
+  .ws-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .ws-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--red); transition: background 0.3s;
+  }
+  .ws-dot.connected { background: var(--green); }
+
+  #babies { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .card-body { padding: 1.25rem; }
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .card-header h2 { font-size: 1.15rem; font-weight: 600; }
+  .card-header .uid {
+    font-size: 0.75rem; color: var(--muted);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  .video-container {
+    position: relative;
+    background: #000;
+    aspect-ratio: 16/9;
+    width: 100%;
+  }
+  .video-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+  .video-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.6);
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .video-overlay.hidden { display: none; }
+
+  .badges { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    padding: 0.2rem 0.6rem; border-radius: 6px;
+    font-size: 0.7rem; font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .badge-green { background: rgba(34,197,94,0.15); color: var(--green); }
+  .badge-red { background: rgba(239,68,68,0.15); color: var(--red); }
+  .badge-amber { background: rgba(245,158,11,0.15); color: var(--amber); }
+  .badge-blue { background: rgba(59,130,246,0.15); color: var(--blue); }
+
+  .sensors {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .sensor {
+    text-align: center;
+    padding: 0.6rem 0.4rem;
+    background: var(--bg);
+    border-radius: 8px;
+  }
+  .sensor-label {
+    font-size: 0.7rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+  }
+  .sensor-value {
+    font-size: 1.5rem; font-weight: 700;
+    font-variant-numeric: tabular-nums; line-height: 1.2;
+  }
+  .sensor-unit { font-size: 0.75rem; font-weight: 400; color: var(--muted); }
+
+  .alerts { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .alert-item {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.35rem 0.65rem; border-radius: 6px;
+    font-size: 0.8rem; background: var(--bg);
+  }
+  .alert-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .alert-dot.on { background: var(--amber); }
+  .alert-dot.off { background: var(--muted); }
+
+  .last-update {
+    font-size: 0.7rem; color: var(--muted);
+    text-align: right; margin-top: 0.75rem;
+  }
+
+  .empty-state {
+    text-align: center; padding: 4rem 2rem; color: var(--muted);
+  }
+  .empty-state h2 { font-size: 1.2rem; margin-bottom: 0.5rem; color: var(--text); }
+
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .updating .card-body { animation: pulse 0.4s ease-in-out; }
+</style>
+</head>
+<body>
+<header>
+  <h1>nanit-bridge</h1>
+  <div class="ws-status">
+    <div class="ws-dot" id="wsDot"></div>
+    <span id="wsLabel">connecting...</span>
+  </div>
+</header>
+<div id="babies">
+  <div class="empty-state" id="emptyState">
+    <h2>Waiting for data...</h2>
+    <p>Connecting to nanit-bridge WebSocket</p>
+  </div>
+</div>
+<script>
+(function() {
+  var babiesEl = document.getElementById('babies');
+  var emptyState = document.getElementById('emptyState');
+  var wsDot = document.getElementById('wsDot');
+  var wsLabel = document.getElementById('wsLabel');
+  var babies = {};
+  var players = {};
+  var ws;
+  var reconnectDelay = 1000;
+
+  function scheduleReconnect() {
+    wsDot.classList.remove('connected');
+    wsLabel.textContent = 'reconnecting...';
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 10000);
+  }
+
+  function connect() {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var closing = false;
+
+    try {
+      ws = new WebSocket(proto + '//' + location.host + '/ws');
+    } catch(e) {
+      scheduleReconnect();
+      return;
+    }
+
+    ws.onopen = function() {
+      wsDot.classList.add('connected');
+      wsLabel.textContent = 'live';
+      reconnectDelay = 1000;
+    };
+
+    ws.onerror = function() {
+      if (!closing) {
+        closing = true;
+        try { ws.close(); } catch(e) {}
+        scheduleReconnect();
+      }
+    };
+
+    ws.onclose = function() {
+      if (!closing) {
+        closing = true;
+        scheduleReconnect();
+      }
+    };
+
+    ws.onmessage = function(e) {
+      var msg = JSON.parse(e.data);
+      if (msg.type === 'initial') {
+        babies = {};
+        (msg.babies || []).forEach(function(b) { babies[b.uid] = b; });
+        // Destroy all players — server restarted, streams need re-establishing.
+        Object.keys(players).forEach(destroyPlayer);
+        renderAll();
+      } else if (msg.type === 'state_update') {
+        var prev = babies[msg.baby.uid];
+        babies[msg.baby.uid] = msg.baby;
+        updateCard(msg.baby.uid, prev);
+      }
+    };
+  }
+
+  function renderAll() {
+    var uids = Object.keys(babies);
+    if (uids.length === 0) {
+      emptyState.style.display = '';
+      return;
+    }
+    emptyState.style.display = 'none';
+    babiesEl.querySelectorAll('.card').forEach(function(el) {
+      if (!babies[el.dataset.uid]) {
+        destroyPlayer(el.dataset.uid);
+        el.remove();
+      }
+    });
+    uids.forEach(function(uid) { updateCard(uid, null); });
+  }
+
+  function ensureCard(uid) {
+    var card = babiesEl.querySelector('.card[data-uid="' + uid + '"]');
+    if (!card) {
+      card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.uid = uid;
+      card.innerHTML =
+        '<div class="video-container">' +
+          '<video id="video-' + uid + '" muted autoplay playsinline></video>' +
+          '<div class="video-overlay" id="overlay-' + uid + '">Stream not active</div>' +
+        '</div>' +
+        '<div class="card-body" id="body-' + uid + '"></div>';
+      babiesEl.appendChild(card);
+    }
+    return card;
+  }
+
+  function updateCard(uid, prev) {
+    var b = babies[uid];
+    if (!b) return;
+    emptyState.style.display = 'none';
+
+    var card = ensureCard(uid);
+    var body = document.getElementById('body-' + uid);
+    var overlay = document.getElementById('overlay-' + uid);
+
+    var s = b.sensors || {};
+    var streamBadge = b.stream === 'active'
+      ? '<span class="badge badge-green">stream active</span>'
+      : b.stream === 'starting'
+        ? '<span class="badge badge-amber">starting</span>'
+        : '<span class="badge badge-red">stream stopped</span>';
+
+    var wsBadge = b.ws_alive
+      ? '<span class="badge badge-blue">ws connected</span>'
+      : '<span class="badge badge-red">ws disconnected</span>';
+
+    var lastUpdate = s.last_update && s.last_update !== '0001-01-01T00:00:00Z'
+      ? new Date(s.last_update).toLocaleTimeString()
+      : 'no data yet';
+
+    body.innerHTML =
+      '<div class="card-header">' +
+        '<div><h2>' + esc(b.name || uid) + '</h2>' +
+        '<div class="uid">' + esc(uid) + '</div></div>' +
+        '<div class="badges">' + streamBadge + wsBadge + '</div>' +
+      '</div>' +
+      '<div class="sensors">' +
+        sensor('Temp', fmtNum(s.temperature, 1), '°C') +
+        sensor('Humidity', fmtNum(s.humidity, 1), '%') +
+        sensor('Light', fmtNum(s.light, 0), 'lx') +
+      '</div>' +
+      '<div class="alerts">' +
+        alertItem('Night', s.is_night) +
+        alertItem('Sound', s.sound_alert) +
+        alertItem('Motion', s.motion_alert) +
+      '</div>' +
+      '<div class="last-update">Last update: ' + lastUpdate + '</div>';
+
+    card.classList.add('updating');
+    setTimeout(function() { card.classList.remove('updating'); }, 400);
+
+    // Use rtmp_active (actual RTMP publisher presence) as source of truth.
+    var isActive = b.rtmp_active || b.stream === 'active';
+
+    if (isActive && !players[uid]) {
+      overlay.classList.add('hidden');
+      startPlayer(uid);
+    } else if (!isActive && players[uid]) {
+      overlay.textContent = 'Stream not active';
+      overlay.classList.remove('hidden');
+      destroyPlayer(uid);
+    } else if (!isActive) {
+      overlay.textContent = 'Stream not active';
+      overlay.classList.remove('hidden');
+    }
+  }
+
+  function startPlayer(uid) {
+    if (!mpegts.isSupported()) {
+      console.warn('mpegts.js not supported in this browser');
+      return;
+    }
+    var videoEl = document.getElementById('video-' + uid);
+    if (!videoEl) return;
+
+    var player = mpegts.createPlayer({
+      type: 'flv',
+      isLive: true,
+      url: location.origin + '/api/stream/' + uid
+    }, {
+      enableWorker: true,
+      liveBufferLatencyChasing: true,
+      liveBufferLatencyMaxLatency: 1.5,
+      liveBufferLatencyMinRemain: 0.3,
+      lazyLoadMaxDuration: 1,
+      deferLoadAfterSourceOpen: false
+    });
+
+    player.attachMediaElement(videoEl);
+    player.load();
+    player.play();
+
+    player.on(mpegts.Events.ERROR, function() {
+      setTimeout(function() {
+        destroyPlayer(uid);
+        if (babies[uid] && babies[uid].stream === 'active') {
+          startPlayer(uid);
+        }
+      }, 2000);
+    });
+
+    players[uid] = player;
+  }
+
+  function destroyPlayer(uid) {
+    if (players[uid]) {
+      try {
+        players[uid].pause();
+        players[uid].unload();
+        players[uid].detachMediaElement();
+        players[uid].destroy();
+      } catch(e) {}
+      delete players[uid];
+    }
+  }
+
+  function sensor(label, value, unit) {
+    return '<div class="sensor">' +
+      '<div class="sensor-label">' + label + '</div>' +
+      '<div class="sensor-value">' + value + '<span class="sensor-unit">' + unit + '</span></div>' +
+    '</div>';
+  }
+
+  function alertItem(label, active) {
+    return '<div class="alert-item">' +
+      '<div class="alert-dot ' + (active ? 'on' : 'off') + '"></div>' +
+      label +
+    '</div>';
+  }
+
+  function fmtNum(v, decimals) {
+    if (v == null || v === 0) return '--';
+    return Number(v).toFixed(decimals);
+  }
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>

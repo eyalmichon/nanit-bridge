@@ -19,6 +19,8 @@ type Config struct {
 	MQTTPassword  string
 	MQTTPrefix    string
 
+	HTTPPort int
+
 	SessionFile string
 	LogLevel    string
 }
@@ -41,6 +43,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid NANIT_RTMP_PORT: %w", err)
 	}
 	c.RTMPPort = port
+
+	httpPort, err := strconv.Atoi(envOrDefault("NANIT_HTTP_PORT", "8080"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid NANIT_HTTP_PORT: %w", err)
+	}
+	c.HTTPPort = httpPort
 
 	if c.RTMPAddr == "" {
 		return nil, fmt.Errorf("NANIT_RTMP_ADDR is required (your LAN IP reachable by the camera, e.g. 192.168.1.100:1935)")

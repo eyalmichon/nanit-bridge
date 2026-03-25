@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"nanit-bridge/internal/api"
 	"nanit-bridge/internal/baby"
 	"nanit-bridge/internal/config"
 	"nanit-bridge/internal/mqtt"
@@ -57,14 +58,21 @@ func main() {
 
 	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr)
 
+	apiServer := api.NewServer(cfg.HTTPPort, mgr, rtmpServer)
+
 	mgr.OnStateChange(func(babyUID string, state *baby.State) {
 		if mqttPub != nil {
 			mqttPub.PublishState(babyUID, state)
 		}
+		apiServer.BroadcastState(babyUID, state)
 	})
 
 	if err := mgr.Start(); err != nil {
 		log.Fatalf("baby manager: %v", err)
+	}
+
+	if err := apiServer.Start(); err != nil {
+		log.Fatalf("api server: %v", err)
 	}
 
 	if mqttPub != nil {
@@ -75,6 +83,7 @@ func main() {
 
 	log.Printf("nanit-bridge is running")
 	log.Printf("  RTMP: rtmp://%s/local/<baby_uid>", cfg.RTMPAddr)
+	log.Printf("  Dashboard: http://0.0.0.0:%d", cfg.HTTPPort)
 	if cfg.MQTTBrokerURL != "" {
 		log.Printf("  MQTT: %s (prefix: %s)", cfg.MQTTBrokerURL, cfg.MQTTPrefix)
 	}

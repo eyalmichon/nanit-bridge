@@ -103,6 +103,29 @@ func NewServer(port int) *Server {
 	}
 }
 
+// HasStream returns true if a publisher is currently broadcasting for the given key.
+func (s *Server) HasStream(key string) bool {
+	s.mu.RLock()
+	_, ok := s.broadcasters[key]
+	s.mu.RUnlock()
+	return ok
+}
+
+// Subscribe returns a packet channel for the given stream key, or nil if the
+// stream is not currently being published. Call unsubscribe when done.
+func (s *Server) Subscribe(key string) (packets <-chan av.Packet, unsubscribe func(), ok bool) {
+	s.mu.RLock()
+	b, found := s.broadcasters[key]
+	s.mu.RUnlock()
+	if !found {
+		return nil, nil, false
+	}
+
+	subID := fmt.Sprintf("http-flv-%d", time.Now().UnixNano())
+	sub := b.addSubscriber(subID)
+	return sub.pktC, func() { b.removeSubscriber(subID) }, true
+}
+
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
 	lis, err := net.Listen("tcp", addr)
