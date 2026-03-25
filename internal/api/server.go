@@ -129,6 +129,12 @@ func (s *Server) handleBabyOrControl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.Contains(path, "/notification_settings") {
+		uid := strings.TrimSuffix(path, "/notification_settings")
+		s.handleNotificationSettings(w, r, uid)
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -193,6 +199,38 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, uid strin
 		}
 		err = s.manager.SetVolume(uid, int(v))
 
+	case "select_track":
+		trackName, ok := body.Value.(string)
+		if !ok || trackName == "" {
+			http.Error(w, "value must be a track name string", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetPlaybackTrack(uid, trackName)
+
+	case "sensor_poll":
+		v, ok := body.Value.(float64)
+		if !ok {
+			http.Error(w, "value must be number (seconds)", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetSensorPollInterval(uid, int(v))
+
+	case "sound_sensitivity":
+		v, ok := body.Value.(float64)
+		if !ok {
+			http.Error(w, "value must be number (2-9)", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetSoundSensitivity(uid, int(v))
+
+	case "motion_sensitivity":
+		v, ok := body.Value.(float64)
+		if !ok {
+			http.Error(w, "value must be number (10000-250000)", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetMotionSensitivity(uid, int(v))
+
 	default:
 		http.Error(w, "unknown action: "+body.Action, http.StatusBadRequest)
 		return
@@ -205,6 +243,39 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, uid strin
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleNotificationSettings(w http.ResponseWriter, r *http.Request, uid string) {
+	switch r.Method {
+	case http.MethodGet:
+		settings, err := s.manager.GetNotificationSettings(uid)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"settings": settings})
+
+	case http.MethodPut:
+		var body struct {
+			Key     string `json:"key"`
+			Enabled bool   `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Key == "" {
+			http.Error(w, "need {\"key\":\"SOUND\",\"enabled\":true}", http.StatusBadRequest)
+			return
+		}
+		settings, err := s.manager.SetNotificationSetting(uid, body.Key, body.Enabled)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"settings": settings})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -324,21 +395,31 @@ func (s *Server) buildBabyJSON(uid string, state *baby.State) map[string]interfa
 		"name":        state.Name,
 		"ws_alive":    wsAlive,
 		"stream":      stream.String(),
-		"rtmp_active": s.rtmpServer.HasStream(uid),
+		"rtmp_active":    s.rtmpServer.HasStream(uid),
+		"sensor_poll_sec": s.manager.GetSensorPollInterval(uid),
+		"push_active":    s.manager.IsPushActive(),
 		"sensors": map[string]interface{}{
-			"temperature":  sensors.Temperature,
-			"humidity":     sensors.Humidity,
-			"light":        sensors.Light,
-			"is_night":     sensors.IsNight,
-			"sound_alert":  sensors.SoundAlert,
-			"motion_alert": sensors.MotionAlert,
-			"last_update":  sensors.LastUpdate.Format(time.RFC3339),
+			"temperature":      sensors.Temperature,
+			"humidity":         sensors.Humidity,
+			"light":            sensors.Light,
+			"is_night":         sensors.IsNight,
+			"cry_detected":     sensors.CryDetected,
+			"cry_detected_at":  sensors.CryDetectedAt.Format(time.RFC3339),
+			"sound_alert":      sensors.SoundAlert,
+			"sound_alert_at":   sensors.SoundAlertAt.Format(time.RFC3339),
+			"motion_alert":     sensors.MotionAlert,
+			"motion_alert_at":  sensors.MotionAlertAt.Format(time.RFC3339),
+			"last_update":      sensors.LastUpdate.Format(time.RFC3339),
 		},
 		"controls": map[string]interface{}{
 			"night_light":         controls.NightLight,
 			"night_light_timeout": controls.NightLightTimeout,
 			"volume":              controls.Volume,
 			"playback":            controls.PlaybackActive,
+			"current_track":       controls.CurrentTrack,
+			"soundtracks":         controls.Soundtracks,
+			"sound_sensitivity":   controls.SoundSensitivity,
+			"motion_sensitivity":  controls.MotionSensitivity,
 		},
 	}
 }

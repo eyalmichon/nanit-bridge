@@ -12,6 +12,9 @@ generate:
 build:
 	go build -o bin/nanit-bridge ./cmd/nanit-bridge
 
+debug:
+	go build -o bin/nanit-debug ./cmd/nanit-debug
+
 run: build
 	./bin/nanit-bridge
 

@@ -158,6 +158,35 @@
   .control-item.wide { grid-column: 1 / -1; }
   .control-label { color: var(--muted); font-size: 0.75rem; }
 
+  .section-title {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    padding-top: 0.75rem;
+  }
+  .notif-group {
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 0.6rem 0.7rem;
+    margin-bottom: 0.5rem;
+  }
+  .notif-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.8rem;
+  }
+  .notif-group-header .control-label { font-size: 0.8rem; font-weight: 500; color: var(--text); }
+  .notif-group-slider {
+    margin-top: 0.4rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--border);
+  }
+  .sens-label { font-size: 0.65rem; color: var(--muted); }
+
   .toggle {
     position: relative;
     width: 36px; height: 20px;
@@ -198,6 +227,23 @@
     text-align: right;
   }
 
+  .track-select {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    max-width: 160px;
+  }
+  .track-select:focus { outline: 1px solid var(--accent); }
+  .track-label {
+    font-size: 0.65rem;
+    color: var(--muted);
+    margin-top: 0.15rem;
+  }
+
   .last-update {
     font-size: 0.7rem; color: var(--muted);
     text-align: right; margin-top: 0.75rem;
@@ -234,6 +280,7 @@
   var wsLabel = document.getElementById('wsLabel');
   var babies = {};
   var players = {};
+  var notifSettings = {};
   var ws;
   var reconnectDelay = 1000;
 
@@ -316,6 +363,101 @@
     }).catch(function(e) { console.error('control error:', e); });
   }
 
+  function fetchNotifSettings(uid) {
+    fetch('/api/babies/' + uid + '/notification_settings')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        notifSettings[uid] = d.settings || {};
+        renderNotifToggles(uid);
+      })
+      .catch(function(e) { console.error('notif settings error:', e); });
+  }
+
+  function toggleNotifSetting(uid, key) {
+    var cur = notifSettings[uid] && notifSettings[uid][key];
+    var newVal = !cur;
+    if (notifSettings[uid]) notifSettings[uid][key] = newVal;
+    renderNotifToggles(uid);
+    fetch('/api/babies/' + uid + '/notification_settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: key, enabled: newVal })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      notifSettings[uid] = d.settings || {};
+      renderNotifToggles(uid);
+    })
+    .catch(function(e) { console.error('toggle notif error:', e); });
+  }
+
+  function renderNotifToggles(uid) {
+    renderNotifCards(uid);
+  }
+
+  var lastSliderValues = {};
+
+  function renderNotifCards(uid, soundSlider, motionSlider) {
+    var el = document.getElementById('notif-cards-' + uid);
+    if (!el) return;
+    var ns = notifSettings[uid] || {};
+    if (soundSlider !== undefined) lastSliderValues[uid] = { sound: soundSlider, motion: motionSlider };
+    var sv = lastSliderValues[uid] || { sound: 4, motion: 12 };
+
+    var groups = [
+      { key: 'SOUND', label: 'Sound Alerts', sensId: 'ctrl-sound-sens-' + uid, sensMin: 0, sensMax: 7, sensVal: sv.sound },
+      { key: 'MOTION', label: 'Motion Alerts', sensId: 'ctrl-motion-sens-' + uid, sensMin: 0, sensMax: 24, sensVal: sv.motion },
+      { key: 'CAMERA_CRY_DETECTION', label: 'Cry Detection', sensId: null }
+    ];
+
+    var html = '';
+    for (var i = 0; i < groups.length; i++) {
+      var g = groups[i];
+      var on = ns[g.key] === true;
+      html += '<div class="notif-group">';
+      html += '<div class="notif-group-header">';
+      html += '<span class="control-label">' + g.label + '</span>';
+      html += '<button class="toggle ' + (on ? 'on' : '') + '" data-uid="' + uid + '" data-key="' + g.key + '"></button>';
+      html += '</div>';
+      if (g.sensId) {
+        html += '<div class="notif-group-slider">';
+        html += '<div class="volume-row">';
+        html += '<span class="sens-label">Less</span>';
+        html += '<input type="range" class="volume-slider" id="' + g.sensId + '" min="' + g.sensMin + '" max="' + g.sensMax + '" value="' + g.sensVal + '">';
+        html += '<span class="sens-label">More</span>';
+        html += '</div>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    el.innerHTML = html;
+
+    el.querySelectorAll('.toggle').forEach(function(btn) {
+      btn.onclick = function() {
+        toggleNotifSetting(this.dataset.uid, this.dataset.key);
+      };
+    });
+
+    var soundSens = document.getElementById('ctrl-sound-sens-' + uid);
+    if (soundSens) {
+      soundSens.onchange = function() {
+        var sliderVal = parseInt(this.value);
+        var sensorVal = 9 - sliderVal;
+        sendControl(uid, 'sound_sensitivity', sensorVal);
+      };
+    }
+
+    var motionSens = document.getElementById('ctrl-motion-sens-' + uid);
+    if (motionSens) {
+      motionSens.onchange = function() {
+        var sliderVal = parseInt(this.value);
+        var sensorVal = 250000 - (sliderVal * 10000);
+        sendControl(uid, 'motion_sensitivity', sensorVal);
+      };
+    }
+  }
+
   // Track pending control states so sensor re-renders don't reset toggles
   // before the camera confirms the new state.
   var pendingControls = {};
@@ -351,6 +493,7 @@
           '<div id="controls-' + uid + '"></div>' +
         '</div>';
       babiesEl.appendChild(card);
+      fetchNotifSettings(uid);
     }
     return card;
   }
@@ -383,6 +526,10 @@
       ? '<span class="badge badge-blue">ws connected</span>'
       : '<span class="badge badge-red">ws disconnected</span>';
 
+    var pushBadge = b.push_active
+      ? '<span class="badge badge-green">push alerts</span>'
+      : '<span class="badge badge-amber">polling alerts</span>';
+
     var lastUpdate = s.last_update && s.last_update !== '0001-01-01T00:00:00Z'
       ? new Date(s.last_update).toLocaleTimeString()
       : 'no data yet';
@@ -392,7 +539,7 @@
       '<div class="card-header">' +
         '<div><h2>' + esc(b.name || uid) + '</h2>' +
         '<div class="uid">' + esc(uid) + '</div></div>' +
-        '<div class="badges">' + streamBadge + wsBadge + '</div>' +
+        '<div class="badges">' + streamBadge + wsBadge + pushBadge + '</div>' +
       '</div>' +
       '<div class="sensors">' +
         sensor('Temp', fmtNum(s.temperature, 1), '°C') +
@@ -401,22 +548,44 @@
       '</div>' +
       '<div class="alerts">' +
         alertItem('Night', s.is_night) +
-        alertItem('Sound', s.sound_alert) +
-        alertItem('Motion', s.motion_alert) +
+        timedAlert('Cry', s.cry_detected, s.cry_detected_at) +
+        timedAlert('Sound', s.sound_alert, s.sound_alert_at) +
+        timedAlert('Motion', s.motion_alert, s.motion_alert_at) +
       '</div>' +
       '<div class="last-update">Last update: ' + lastUpdate + '</div>';
 
-    // Update controls — only rebuild if no existing controls or control state changed.
+    var tracks = c.soundtracks || [];
+    var curTrack = c.current_track || '';
+    var pollSec = b.sensor_poll_sec || 30;
+    var soundSensRaw = c.sound_sensitivity || 5;
+    var motionSensRaw = c.motion_sensitivity || 130000;
+    var soundSlider = Math.max(0, Math.min(7, 9 - soundSensRaw));
+    var motionSlider = Math.max(0, Math.min(24, Math.round((250000 - motionSensRaw) / 10000)));
+
     var controlsChanged = !prev ||
       !prev.controls ||
       prev.controls.night_light !== c.night_light ||
       prev.controls.playback !== c.playback ||
-      prev.controls.volume !== c.volume;
+      prev.controls.volume !== c.volume ||
+      prev.controls.current_track !== c.current_track ||
+      (prev.controls.soundtracks || []).length !== tracks.length;
 
     if (!controlsEl.hasChildNodes() || controlsChanged) {
-      // Full rebuild of controls section.
+      var trackOptions = '';
+      for (var i = 0; i < tracks.length; i++) {
+        var tName = tracks[i].name || '';
+        var displayName = tName.replace(/\.wav$/i, '');
+        var selected = tName === curTrack ? ' selected' : '';
+        trackOptions += '<option value="' + esc(tName) + '"' + selected + '>' + esc(displayName) + '</option>';
+      }
+      var trackSelectHtml = tracks.length > 0
+        ? '<select class="track-select" id="ctrl-track-' + uid + '">' + trackOptions + '</select>'
+        : '<span class="track-label">no tracks</span>';
+
       controlsEl.innerHTML =
-        '<div class="controls">' +
+        // -- Camera Controls --
+        '<div class="section-title">Camera Controls</div>' +
+        '<div class="controls" style="margin-top:0; border-top:none; padding-top:0;">' +
           '<div class="control-item">' +
             '<span class="control-label">Night Light</span>' +
             '<button class="toggle ' + (nlOn ? 'on' : '') + '" id="ctrl-nl-' + uid + '"></button>' +
@@ -426,10 +595,30 @@
             '<button class="toggle ' + (pbOn ? 'on' : '') + '" id="ctrl-pb-' + uid + '"></button>' +
           '</div>' +
           '<div class="control-item wide">' +
+            '<span class="control-label">Track</span>' +
+            trackSelectHtml +
+          '</div>' +
+          '<div class="control-item wide">' +
             '<span class="control-label">Volume</span>' +
             '<div class="volume-row">' +
               '<input type="range" class="volume-slider" id="ctrl-vol-' + uid + '" min="0" max="100" value="' + vol + '">' +
               '<span class="volume-val" id="ctrl-vol-val-' + uid + '">' + vol + '</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        // -- Notifications --
+        '<div class="section-title" style="margin-top:0.5rem;">Notifications</div>' +
+        '<div id="notif-cards-' + uid + '"></div>' +
+
+        // -- Monitoring --
+        '<div class="section-title" style="margin-top:0.5rem;">Monitoring</div>' +
+        '<div class="controls" style="margin-top:0; border-top:none; padding-top:0;">' +
+          '<div class="control-item wide">' +
+            '<span class="control-label">Sensor Poll Interval</span>' +
+            '<div class="volume-row">' +
+              '<input type="range" class="volume-slider" id="ctrl-poll-' + uid + '" min="5" max="120" value="' + pollSec + '">' +
+              '<span class="volume-val" id="ctrl-poll-val-' + uid + '">' + pollSec + 's</span>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -452,6 +641,11 @@
         this.classList.toggle('on', newVal);
       };
 
+      var trackSel = document.getElementById('ctrl-track-' + uid);
+      if (trackSel) trackSel.onchange = function() {
+        sendControl(uid, 'select_track', this.value);
+      };
+
       var volSlider = document.getElementById('ctrl-vol-' + uid);
       var volVal = document.getElementById('ctrl-vol-val-' + uid);
       if (volSlider) {
@@ -462,13 +656,28 @@
           sendControl(uid, 'volume', v);
         };
       }
+
+      var pollSlider = document.getElementById('ctrl-poll-' + uid);
+      var pollVal = document.getElementById('ctrl-poll-val-' + uid);
+      if (pollSlider) {
+        pollSlider.oninput = function() { pollVal.textContent = this.value + 's'; };
+        pollSlider.onchange = function() {
+          sendControl(uid, 'sensor_poll', parseInt(this.value));
+        };
+      }
+
+      renderNotifCards(uid, soundSlider, motionSlider);
     } else {
-      // No full rebuild, but still sync toggle visuals with server state
-      // so external changes (e.g. from the Nanit app) are reflected.
       var nlBtnSync = document.getElementById('ctrl-nl-' + uid);
       if (nlBtnSync) nlBtnSync.classList.toggle('on', nlOn);
       var pbBtnSync = document.getElementById('ctrl-pb-' + uid);
       if (pbBtnSync) pbBtnSync.classList.toggle('on', pbOn);
+      var trackSelSync = document.getElementById('ctrl-track-' + uid);
+      if (trackSelSync && curTrack) trackSelSync.value = curTrack;
+      var soundSensEl = document.getElementById('ctrl-sound-sens-' + uid);
+      if (soundSensEl) soundSensEl.value = soundSlider;
+      var motionSensEl = document.getElementById('ctrl-motion-sens-' + uid);
+      if (motionSensEl) motionSensEl.value = motionSlider;
     }
 
     var isActive = b.rtmp_active || b.stream === 'active';
@@ -546,6 +755,22 @@
     return '<div class="alert-item">' +
       '<div class="alert-dot ' + (active ? 'on' : 'off') + '"></div>' +
       label +
+    '</div>';
+  }
+
+  function timedAlert(label, detected, detectedAt) {
+    var active = false;
+    var agoText = '';
+    if (detected && detectedAt && detectedAt !== '0001-01-01T00:00:00Z') {
+      var elapsed = (Date.now() - new Date(detectedAt).getTime()) / 1000;
+      active = elapsed < 60;
+      if (elapsed < 10) agoText = ' (just now)';
+      else if (elapsed < 60) agoText = ' (' + Math.round(elapsed) + 's ago)';
+      else if (elapsed < 3600) agoText = ' (' + Math.round(elapsed / 60) + 'm ago)';
+    }
+    return '<div class="alert-item">' +
+      '<div class="alert-dot ' + (active ? 'on' : 'off') + '"></div>' +
+      label + agoText +
     '</div>';
   }
 

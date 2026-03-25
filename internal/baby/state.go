@@ -6,13 +6,22 @@ import (
 )
 
 type SensorState struct {
-	Temperature float64
-	Humidity    float64
-	Light       float64
-	IsNight     bool
-	SoundAlert  bool
-	MotionAlert bool
-	LastUpdate  time.Time
+	Temperature    float64
+	Humidity       float64
+	Light          float64
+	IsNight        bool
+	CryDetected    bool
+	CryDetectedAt  time.Time
+	SoundAlert     bool
+	SoundAlertAt   time.Time
+	MotionAlert    bool
+	MotionAlertAt  time.Time
+	LastUpdate     time.Time
+}
+
+type SoundtrackInfo struct {
+	Name     string `json:"name"`
+	Category int    `json:"category"`
 }
 
 type ControlState struct {
@@ -20,6 +29,10 @@ type ControlState struct {
 	NightLightTimeout int
 	Volume            int
 	PlaybackActive    bool
+	CurrentTrack      string
+	Soundtracks       []SoundtrackInfo
+	SoundSensitivity  int
+	MotionSensitivity int
 }
 
 type StreamState int

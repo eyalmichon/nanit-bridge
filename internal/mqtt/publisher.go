@@ -78,6 +78,7 @@ func (p *Publisher) PublishState(babyUID string, state *baby.State) {
 	p.pub(babyUID, "humidity", fmt.Sprintf("%.1f", sensors.Humidity))
 	p.pub(babyUID, "light", fmt.Sprintf("%.1f", sensors.Light))
 	p.pub(babyUID, "is_night", boolStr(sensors.IsNight))
+	p.pub(babyUID, "cry_detected", boolStr(sensors.CryDetected))
 	p.pub(babyUID, "sound_alert", boolStr(sensors.SoundAlert))
 	p.pub(babyUID, "motion_alert", boolStr(sensors.MotionAlert))
 	p.pub(babyUID, "stream_state", stream.String())
@@ -130,6 +131,7 @@ func (p *Publisher) PublishDiscovery(babyUID, name string) {
 		icon string
 	}{
 		{"Night Mode", "is_night", "mdi:weather-night"},
+		{"Cry Detected", "cry_detected", "mdi:emoticon-cry-outline"},
 		{"Sound Alert", "sound_alert", "mdi:volume-high"},
 		{"Motion Alert", "motion_alert", "mdi:motion-sensor"},
 		{"Stream Active", "stream_state", "mdi:video"},

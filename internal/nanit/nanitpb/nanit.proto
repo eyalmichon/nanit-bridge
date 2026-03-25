@@ -57,6 +57,7 @@ enum SensorType {
   HUMIDITY = 3;
   LIGHT = 4;
   NIGHT = 5;
+  CRY = 7;
 }
 
 message SensorData {
@@ -187,6 +188,9 @@ message Playback {
   }
 
   required Status status = 1;
+  optional int32 timer = 2;
+  repeated Soundtrack soundtracks = 3;
+  optional Soundtrack current_track = 4;
 }
 
 message Soundtrack {

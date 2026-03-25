@@ -234,6 +234,134 @@ func (tm *TokenManager) FetchBabies() ([]Baby, error) {
 	return babies, nil
 }
 
+// NotificationSettings maps setting keys to enabled/disabled.
+type NotificationSettings map[string]bool
+
+// GetNotificationSettings fetches the server-side push notification settings
+// for a baby. Each key (e.g. "SOUND", "MOTION") maps to an on/off bool.
+func (tm *TokenManager) GetNotificationSettings(babyUID string) (NotificationSettings, error) {
+	token, err := tm.GetAccessToken()
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("%s/babies/%s/notification_settings", apiBase, babyUID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", token)
+	req.Header.Set("nanit-api-version", apiVersion)
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := tm.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("get notification settings: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("get notification settings: HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Settings NotificationSettings `json:"settings"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("get notification settings: parse: %w", err)
+	}
+	return result.Settings, nil
+}
+
+// PutNotificationSettings updates one or more notification settings and returns
+// the full resulting state.
+func (tm *TokenManager) PutNotificationSettings(babyUID string, updates NotificationSettings) (NotificationSettings, error) {
+	token, err := tm.GetAccessToken()
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]interface{}{"settings": updates}
+	body, _ := json.Marshal(payload)
+
+	url := fmt.Sprintf("%s/babies/%s/notification_settings", apiBase, babyUID)
+	req, err := http.NewRequest("PUT", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("nanit-api-version", apiVersion)
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := tm.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("put notification settings: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("put notification settings: HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Settings NotificationSettings `json:"settings"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("put notification settings: parse: %w", err)
+	}
+	return result.Settings, nil
+}
+
+// AlertMessage represents a cloud-side detection (SOUND, MOTION, etc.)
+type AlertMessage struct {
+	ID        int64  `json:"id"`
+	BabyUID   string `json:"baby_uid"`
+	Type      string `json:"type"`
+	Time      int64  `json:"time"`
+	CreatedAt string `json:"created_at"`
+}
+
+// FetchMessages returns recent alert messages from the Nanit cloud API.
+// Pass lastID > 0 to only return messages newer than that ID.
+func (tm *TokenManager) FetchMessages(babyUID string, limit int) ([]AlertMessage, error) {
+	token, err := tm.GetAccessToken()
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("%s/babies/%s/messages?limit=%d", apiBase, babyUID, limit)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", token)
+	req.Header.Set("nanit-api-version", apiVersion)
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := tm.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch messages: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("fetch messages: HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Messages []AlertMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("fetch messages: parse: %w", err)
+	}
+
+	return result.Messages, nil
+}
+
 // LoadSession restores a previously saved session from disk.
 func (tm *TokenManager) LoadSession() error {
 	data, err := os.ReadFile(tm.filePath)

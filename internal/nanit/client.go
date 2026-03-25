@@ -40,37 +40,61 @@ type CameraClient struct {
 	tokenMgr  *TokenManager
 	rtmpURL   string
 
+	sensorPollSec atomic.Int32
+
 	conn      *websocket.Conn
 	connMu    sync.Mutex
 	requestID atomic.Int32
 	lastRecv  atomic.Int64
 
-	onSensor      func(SensorUpdate)
-	onStreaming   func(StreamingUpdate)
-	onSettings    func(*pb.Settings)
-	onControl     func(*pb.Control)
-	onPlayback    func(bool)
-
+	onSensor        func(SensorUpdate)
+	onStreaming     func(StreamingUpdate)
+	onSettings      func(*pb.Settings)
+	onControl       func(*pb.Control)
+	onPlaybackState func(*pb.Playback)
+	onSoundtracks   func([]*pb.Soundtrack)
+	onConnect       func()
+	onDisconnect    func()
 
 	done chan struct{}
 	wg   sync.WaitGroup
 }
 
-func NewCameraClient(cameraUID, babyUID string, tokenMgr *TokenManager, rtmpURL string) *CameraClient {
-	return &CameraClient{
+func NewCameraClient(cameraUID, babyUID string, tokenMgr *TokenManager, rtmpURL string, sensorPollSec int) *CameraClient {
+	if sensorPollSec <= 0 {
+		sensorPollSec = 30
+	}
+	c := &CameraClient{
 		cameraUID: cameraUID,
 		babyUID:   babyUID,
 		tokenMgr:  tokenMgr,
 		rtmpURL:   rtmpURL,
 		done:      make(chan struct{}),
 	}
+	c.sensorPollSec.Store(int32(sensorPollSec))
+	return c
 }
 
-func (c *CameraClient) OnSensor(fn func(SensorUpdate))       { c.onSensor = fn }
-func (c *CameraClient) OnStreaming(fn func(StreamingUpdate))  { c.onStreaming = fn }
-func (c *CameraClient) OnSettings(fn func(*pb.Settings))      { c.onSettings = fn }
-func (c *CameraClient) OnControl(fn func(*pb.Control))        { c.onControl = fn }
-func (c *CameraClient) OnPlayback(fn func(bool))              { c.onPlayback = fn }
+func (c *CameraClient) SetSensorPollInterval(seconds int) {
+	if seconds < 5 {
+		seconds = 5
+	}
+	c.sensorPollSec.Store(int32(seconds))
+	log.Printf("[camera:%s] sensor poll interval set to %ds", c.cameraUID, seconds)
+}
+
+func (c *CameraClient) GetSensorPollInterval() int {
+	return int(c.sensorPollSec.Load())
+}
+
+func (c *CameraClient) OnSensor(fn func(SensorUpdate))        { c.onSensor = fn }
+func (c *CameraClient) OnStreaming(fn func(StreamingUpdate))   { c.onStreaming = fn }
+func (c *CameraClient) OnSettings(fn func(*pb.Settings))       { c.onSettings = fn }
+func (c *CameraClient) OnControl(fn func(*pb.Control))         { c.onControl = fn }
+func (c *CameraClient) OnPlaybackState(fn func(*pb.Playback))  { c.onPlaybackState = fn }
+func (c *CameraClient) OnSoundtracks(fn func([]*pb.Soundtrack)) { c.onSoundtracks = fn }
+func (c *CameraClient) OnConnect(fn func())                    { c.onConnect = fn }
+func (c *CameraClient) OnDisconnect(fn func())                 { c.onDisconnect = fn }
 
 
 func (c *CameraClient) Start() {
@@ -99,9 +123,14 @@ func (c *CameraClient) connectLoop() {
 		default:
 		}
 
+		connStart := time.Now()
 		err := c.connect()
 		if err != nil {
 			log.Printf("[camera:%s] connection error: %v", c.cameraUID, err)
+		}
+
+		if time.Since(connStart) > 2*time.Minute {
+			attempt = 0
 		}
 
 		select {
@@ -141,41 +170,51 @@ func (c *CameraClient) connect() error {
 
 	log.Printf("[camera:%s] connected to cloud WebSocket", c.cameraUID)
 
+	if c.onConnect != nil {
+		c.onConnect()
+	}
+
 	errCh := make(chan error, 2)
 
-	c.wg.Add(2)
+	c.wg.Add(3)
 	go c.readLoop(conn, errCh)
 	go c.keepaliveLoop(conn, errCh)
+	go c.sensorPollLoop()
 
-	if err := c.requestSensorData(); err != nil {
-		log.Printf("[camera:%s] failed to request sensor data: %v", c.cameraUID, err)
+	initRequests := []struct {
+		name string
+		fn   func() error
+	}{
+		{"sensor data", c.requestSensorData},
+		{"settings", c.RequestSettings},
+		{"control state", c.RequestControl},
+		{"sensor push", c.enableSensorPush},
+		{"playback state", c.RequestPlayback},
+		{"soundtracks", c.RequestSoundtracks},
 	}
-	if err := c.RequestSettings(); err != nil {
-		log.Printf("[camera:%s] failed to request settings: %v", c.cameraUID, err)
+	for _, r := range initRequests {
+		if err := r.fn(); err != nil {
+			log.Printf("[camera:%s] init %s: %v", c.cameraUID, r.name, err)
+		}
 	}
-	if err := c.RequestControl(); err != nil {
-		log.Printf("[camera:%s] failed to request control state: %v", c.cameraUID, err)
-	}
-	if err := c.RequestPlayback(); err != nil {
-		log.Printf("[camera:%s] failed to request playback state: %v", c.cameraUID, err)
-	}
-	log.Printf("[camera:%s] sending PUT_STREAMING with RTMP URL: %s", c.cameraUID, c.rtmpURL)
 	if err := c.startStreaming(); err != nil {
 		log.Printf("[camera:%s] failed to start streaming: %v", c.cameraUID, err)
-	} else {
-		log.Printf("[camera:%s] PUT_STREAMING sent successfully", c.cameraUID)
 	}
 
+	var result error
 	select {
-	case err := <-errCh:
-		c.stopStreaming()
-		conn.Close()
-		return err
+	case result = <-errCh:
 	case <-c.done:
-		c.stopStreaming()
-		conn.Close()
-		return nil
 	}
+
+	c.stopStreaming()
+	conn.Close()
+
+	if c.onDisconnect != nil {
+		c.onDisconnect()
+	}
+
+	return result
 }
 
 func (c *CameraClient) readLoop(conn *websocket.Conn, errCh chan<- error) {
@@ -197,6 +236,29 @@ func (c *CameraClient) readLoop(conn *websocket.Conn, errCh chan<- error) {
 		}
 
 		c.handleMessage(msg)
+	}
+}
+
+func (c *CameraClient) sensorPollLoop() {
+	defer c.wg.Done()
+
+	curInterval := c.sensorPollSec.Load()
+	ticker := time.NewTicker(time.Duration(curInterval) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := c.requestSensorData(); err != nil {
+				log.Printf("[camera:%s] sensor poll failed: %v", c.cameraUID, err)
+			}
+			if newInterval := c.sensorPollSec.Load(); newInterval != curInterval {
+				curInterval = newInterval
+				ticker.Reset(time.Duration(curInterval) * time.Second)
+			}
+		case <-c.done:
+			return
+		}
 	}
 }
 
@@ -272,9 +334,8 @@ func (c *CameraClient) handleRequest(req *pb.Request) {
 		}
 
 	case pb.RequestType_PUT_PLAYBACK:
-		log.Printf("[camera:%s] camera pushed playback state: %v", c.cameraUID, req.GetPlayback().GetStatus())
-		if c.onPlayback != nil && req.GetPlayback() != nil {
-			c.onPlayback(req.GetPlayback().GetStatus() == pb.Playback_STARTED)
+		if err := c.RequestPlayback(); err != nil {
+			log.Printf("[camera:%s] failed to query playback after push: %v", c.cameraUID, err)
 		}
 
 	case pb.RequestType_PUT_STREAMING:
@@ -286,7 +347,7 @@ func (c *CameraClient) handleRequest(req *pb.Request) {
 		}
 
 	default:
-		log.Printf("[camera:%s] unhandled push request type: %v", c.cameraUID, req.GetType())
+		// Silently ignore unknown push types (e.g. PUT_STING_STATUS = 50).
 	}
 }
 
@@ -315,21 +376,32 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 		}
 
 	case pb.RequestType_GET_PLAYBACK:
-		if resp.GetPlayback() != nil {
-			log.Printf("[camera:%s] playback state confirmed: %v",
-				c.cameraUID, resp.GetPlayback().GetStatus())
-			if c.onPlayback != nil {
-				c.onPlayback(resp.GetPlayback().GetStatus() == pb.Playback_STARTED)
-			}
+		if c.onPlaybackState != nil && resp.GetPlayback() != nil {
+			c.onPlaybackState(resp.GetPlayback())
 		}
 
 	case pb.RequestType_PUT_PLAYBACK:
-		log.Printf("[camera:%s] PUT_PLAYBACK: status=%d %s",
-			c.cameraUID, resp.GetStatusCode(), resp.GetStatusMessage())
+		// Acknowledged; no action needed.
+
+	case pb.RequestType_GET_SOUNDTRACKS:
+		if c.onSoundtracks != nil {
+			c.onSoundtracks(resp.GetSoundtracks())
+		}
+
+	case pb.RequestType_PUT_STREAMING:
+		if resp.GetStatusCode() == 200 && c.onStreaming != nil {
+			started := pb.Streaming_STARTED
+			c.onStreaming(StreamingUpdate{
+				CameraUID: c.cameraUID,
+				Streaming: &pb.Streaming{Status: &started},
+			})
+		}
 
 	default:
-		log.Printf("[camera:%s] response for %v: status=%d %s",
-			c.cameraUID, resp.GetRequestType(), resp.GetStatusCode(), resp.GetStatusMessage())
+		if resp.GetStatusCode() != 200 {
+			log.Printf("[camera:%s] %v: status=%d %s",
+				c.cameraUID, resp.GetRequestType(), resp.GetStatusCode(), resp.GetStatusMessage())
+		}
 	}
 }
 
@@ -403,8 +475,25 @@ func (c *CameraClient) RequestControl() error {
 	return c.sendRequest(pb.RequestType_GET_CONTROL, func(req *pb.Request) {
 		t := true
 		req.GetControl_ = &pb.GetControl{
-			NightLight:        &t,
-			NightLightTimeout: &t,
+			NightLight:            &t,
+			NightLightTimeout:     &t,
+			SensorDataTransferEn:  &t,
+		}
+	})
+}
+
+func (c *CameraClient) enableSensorPush() error {
+	return c.sendRequest(pb.RequestType_PUT_CONTROL, func(req *pb.Request) {
+		t := true
+		req.Control = &pb.Control{
+			SensorDataTransfer: &pb.Control_SensorDataTransfer{
+				Sound:       &t,
+				Motion:      &t,
+				Temperature: &t,
+				Humidity:    &t,
+				Light:       &t,
+				Night:       &t,
+			},
 		}
 	})
 }
@@ -427,21 +516,34 @@ func (c *CameraClient) SetNightLightTimeout(seconds int) error {
 }
 
 func (c *CameraClient) SetPlayback(on bool) error {
+	return c.SetPlaybackTrack(on, "")
+}
+
+func (c *CameraClient) SetPlaybackTrack(on bool, trackName string) error {
 	err := c.sendRequest(pb.RequestType_PUT_PLAYBACK, func(req *pb.Request) {
 		s := pb.Playback_STOPPED
 		if on {
 			s = pb.Playback_STARTED
 		}
-		req.Playback = &pb.Playback{Status: &s}
+		playback := &pb.Playback{Status: &s}
+		if on {
+			continuous := int32(-1)
+			playback.Timer = &continuous
+			if trackName != "" {
+				cat := int32(0)
+				playback.Soundtracks = []*pb.Soundtrack{{
+					Category: &cat,
+					Name:     &trackName,
+				}}
+			}
+		}
+		req.Playback = playback
 	})
 	if err != nil {
 		return err
 	}
-	// Camera doesn't push PUT_PLAYBACK state like it does for PUT_CONTROL.
-	// Query the confirmed state after a short delay so the camera has time
-	// to process the PUT before we query.
 	go func() {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(2 * time.Second)
 		if err := c.RequestPlayback(); err != nil {
 			log.Printf("[camera:%s] failed to query playback state: %v", c.cameraUID, err)
 		}
@@ -450,15 +552,81 @@ func (c *CameraClient) SetPlayback(on bool) error {
 }
 
 func (c *CameraClient) SetVolume(level int) error {
-	return c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
-		v := int32(level)
-		req.Settings = &pb.Settings{Volume: &v}
+	v := int32(level)
+	settings := &pb.Settings{Volume: &v}
+	err := c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
+		req.Settings = settings
 	})
+	if err == nil && c.onSettings != nil {
+		c.onSettings(settings)
+	}
+	return err
+}
+
+func (c *CameraClient) SetSoundSensitivity(value int32) error {
+	sType := pb.SensorType_SOUND
+	useLow := true
+	useHigh := true
+	low := int32(750)
+	high := value
+	sampleSec := int32(1)
+	triggerSec := int32(0)
+	settings := &pb.Settings{
+		Sensors: []*pb.Settings_SensorSettings{{
+			SensorType:         &sType,
+			UseLowThreshold:    &useLow,
+			UseHighThreshold:   &useHigh,
+			LowThreshold:       &low,
+			HighThreshold:      &high,
+			SampleIntervalSec:  &sampleSec,
+			TriggerIntervalSec: &triggerSec,
+		}},
+	}
+	err := c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
+		req.Settings = settings
+	})
+	if err == nil && c.onSettings != nil {
+		c.onSettings(settings)
+	}
+	return err
+}
+
+func (c *CameraClient) SetMotionSensitivity(value int32) error {
+	sType := pb.SensorType_MOTION
+	useLow := true
+	useHigh := true
+	low := int32(2000)
+	high := value
+	sampleSec := int32(1)
+	triggerSec := int32(0)
+	settings := &pb.Settings{
+		Sensors: []*pb.Settings_SensorSettings{{
+			SensorType:         &sType,
+			UseLowThreshold:    &useLow,
+			UseHighThreshold:   &useHigh,
+			LowThreshold:       &low,
+			HighThreshold:      &high,
+			SampleIntervalSec:  &sampleSec,
+			TriggerIntervalSec: &triggerSec,
+		}},
+	}
+	err := c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
+		req.Settings = settings
+	})
+	if err == nil && c.onSettings != nil {
+		c.onSettings(settings)
+	}
+	return err
 }
 
 func (c *CameraClient) RequestPlayback() error {
 	return c.sendRequest(pb.RequestType_GET_PLAYBACK, nil)
 }
+
+func (c *CameraClient) RequestSoundtracks() error {
+	return c.sendRequest(pb.RequestType_GET_SOUNDTRACKS, nil)
+}
+
 
 // backoff computes delay with exponential backoff + jitter, capped at maxBackoff.
 func backoff(attempt int) time.Duration {

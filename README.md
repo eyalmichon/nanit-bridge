@@ -1,13 +1,15 @@
 # nanit-bridge
 
-A lightweight Go service that connects to a Nanit baby monitor, receives local RTMP video, and publishes sensor data via MQTT. Designed for integration with Frigate NVR and Home Assistant.
+A lightweight Go service that connects to a Nanit baby monitor, receives local RTMP video, and publishes sensor data via MQTT. Includes a web dashboard for live monitoring and camera control. Designed for integration with Frigate NVR and Home Assistant.
 
 ## How it works
 
 ```
 Nanit Camera ──RTMP (local LAN)──► nanit-bridge ──RTMP──► Frigate (go2rtc)
                                         │
-                                        └──MQTT──► Home Assistant
+                                        ├──MQTT──► Home Assistant
+                                        │
+                                        └──HTTP──► Web Dashboard
 ```
 
 1. Authenticates with Nanit's cloud API (`api.nanit.com`)
@@ -16,6 +18,19 @@ Nanit Camera ──RTMP (local LAN)──► nanit-bridge ──RTMP──► Fr
 4. Camera streams video directly over your LAN (low latency)
 5. Frigate's go2rtc pulls the RTMP stream
 6. Sensor data (temperature, humidity, light) published to MQTT
+7. Push notifications (sound, motion, cry) via Firebase Cloud Messaging
+
+## Features
+
+- **Local RTMP video relay** — camera streams directly over your LAN
+- **HTTP-FLV live stream** — watch in the dashboard without any extra software
+- **Web dashboard** — real-time sensor data, camera controls, live video
+- **Camera controls** — night light, sound machine (with track selection), volume, sensitivity
+- **Push notifications** — instant sound, motion, and cry alerts via FCM (no polling)
+- **Notification toggles** — enable/disable sound, motion, and cry alerts
+- **Sensitivity sliders** — adjust sound and motion detection thresholds
+- **MQTT publishing** — sensor data + HA auto-discovery
+- **Auto-reconnect** — exponential backoff with jitter on WebSocket disconnect
 
 ## Quick start
 
@@ -38,7 +53,11 @@ On first run, if MFA is required, run interactively to enter the code:
 docker compose run --rm nanit-bridge
 ```
 
-### 3. Configure Frigate
+### 3. Open the dashboard
+
+Navigate to `http://NANIT_BRIDGE_IP:8080` to see the live dashboard with sensor readings, video stream, and camera controls.
+
+### 4. Configure Frigate
 
 ```yaml
 go2rtc:
@@ -56,7 +75,7 @@ cameras:
             - record
 ```
 
-### 4. Sensor data in Home Assistant
+### 5. Sensor data in Home Assistant
 
 If MQTT is configured, HA auto-discovery creates entities automatically:
 - `sensor.nanit_<name>_temperature`
@@ -65,6 +84,21 @@ If MQTT is configured, HA auto-discovery creates entities automatically:
 - `binary_sensor.nanit_<name>_night_mode`
 - `binary_sensor.nanit_<name>_sound_alert`
 - `binary_sensor.nanit_<name>_motion_alert`
+
+## Push notifications (FCM)
+
+nanit-bridge can register as an FCM client to receive instant sound, motion, and cry alerts — the same mechanism the official Nanit app uses. This eliminates polling and gives sub-second alert latency.
+
+On first start, the bridge automatically registers with FCM and stores credentials in the push creds file. No manual setup is required.
+
+## Commands
+
+The project has two binaries:
+
+| Command | Description |
+|---|---|
+| `cmd/nanit-bridge` | Main service — runs the RTMP relay, dashboard, MQTT, and FCM receiver |
+| `cmd/nanit-debug` | Diagnostic tool — connects to the camera WebSocket and dumps all raw protobuf messages for reverse engineering |
 
 ## Development (devcontainer)
 
@@ -84,11 +118,14 @@ make run      # compile + run
 | `NANIT_PASSWORD` | Yes* | | Nanit account password |
 | `NANIT_RTMP_ADDR` | Yes | | LAN IP:port the camera pushes RTMP to (e.g. `192.168.1.100:1935`) |
 | `NANIT_RTMP_PORT` | No | `1935` | RTMP listen port |
+| `NANIT_HTTP_PORT` | No | `8080` | Web dashboard port |
+| `NANIT_SENSOR_POLL_SEC` | No | `30` | Sensor data poll interval in seconds |
 | `NANIT_MQTT_BROKER_URL` | No | | MQTT broker (e.g. `tcp://192.168.1.10:1883`) |
 | `NANIT_MQTT_USERNAME` | No | | MQTT username |
 | `NANIT_MQTT_PASSWORD` | No | | MQTT password |
 | `NANIT_MQTT_PREFIX` | No | `nanit` | MQTT topic prefix |
 | `NANIT_SESSION_FILE` | No | `/data/session.json` | Token persistence file |
+| `NANIT_PUSH_CREDS_FILE` | No | `/data/push_creds.json` | FCM credentials persistence file |
 | `NANIT_LOG_LEVEL` | No | `info` | Log level |
 
 *Not required after initial login if a valid session file exists.

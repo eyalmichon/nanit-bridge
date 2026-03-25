@@ -21,8 +21,11 @@ type Config struct {
 
 	HTTPPort int
 
-	SessionFile string
-	LogLevel    string
+	SensorPollSec int
+
+	SessionFile   string
+	PushCredsFile string
+	LogLevel      string
 }
 
 func Load() (*Config, error) {
@@ -35,6 +38,7 @@ func Load() (*Config, error) {
 		MQTTPassword:  os.Getenv("NANIT_MQTT_PASSWORD"),
 		MQTTPrefix:    envOrDefault("NANIT_MQTT_PREFIX", "nanit"),
 		SessionFile:   envOrDefault("NANIT_SESSION_FILE", "/data/session.json"),
+		PushCredsFile: envOrDefault("NANIT_PUSH_CREDS_FILE", "/data/push_creds.json"),
 		LogLevel:      envOrDefault("NANIT_LOG_LEVEL", "info"),
 	}
 
@@ -49,6 +53,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid NANIT_HTTP_PORT: %w", err)
 	}
 	c.HTTPPort = httpPort
+
+	sensorPoll, err := strconv.Atoi(envOrDefault("NANIT_SENSOR_POLL_SEC", "30"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid NANIT_SENSOR_POLL_SEC: %w", err)
+	}
+	c.SensorPollSec = sensorPoll
 
 	if c.RTMPAddr == "" {
 		return nil, fmt.Errorf("NANIT_RTMP_ADDR is required (your LAN IP reachable by the camera, e.g. 192.168.1.100:1935)")
