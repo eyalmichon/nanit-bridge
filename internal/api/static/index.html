@@ -513,6 +513,8 @@
 
     // Resolve effective control values (pending overrides server until confirmed).
     var nlOn = getControlValue(uid, 'night_light', c.night_light);
+    var nlBright = c.night_light_brightness || 0;
+    var nlTimeout = c.night_light_timeout || 0;
     var pbOn = getControlValue(uid, 'playback', c.playback);
     var vol = getControlValue(uid, 'volume', c.volume || 0);
 
@@ -590,6 +592,23 @@
             '<span class="control-label">Night Light</span>' +
             '<button class="toggle ' + (nlOn ? 'on' : '') + '" id="ctrl-nl-' + uid + '"></button>' +
           '</div>' +
+          '<div class="control-item wide">' +
+            '<span class="control-label">Brightness</span>' +
+            '<div class="volume-row">' +
+              '<input type="range" class="volume-slider" id="ctrl-bright-' + uid + '" min="0" max="100" value="' + nlBright + '">' +
+              '<span class="volume-val" id="ctrl-bright-val-' + uid + '">' + nlBright + '%</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="control-item wide">' +
+            '<span class="control-label">Timer</span>' +
+            '<select class="track-select" id="ctrl-nl-timer-' + uid + '">' +
+              '<option value="0"' + (nlTimeout === 0 ? ' selected' : '') + '>Always on</option>' +
+              '<option value="900"' + (nlTimeout === 900 ? ' selected' : '') + '>15 min</option>' +
+              '<option value="1800"' + (nlTimeout === 1800 ? ' selected' : '') + '>30 min</option>' +
+              '<option value="3600"' + (nlTimeout === 3600 ? ' selected' : '') + '>1 hour</option>' +
+              '<option value="7200"' + (nlTimeout === 7200 ? ' selected' : '') + '>2 hours</option>' +
+            '</select>' +
+          '</div>' +
           '<div class="control-item">' +
             '<span class="control-label">Sound Machine</span>' +
             '<button class="toggle ' + (pbOn ? 'on' : '') + '" id="ctrl-pb-' + uid + '"></button>' +
@@ -646,6 +665,20 @@
         sendControl(uid, 'select_track', this.value);
       };
 
+      var brightSlider = document.getElementById('ctrl-bright-' + uid);
+      var brightVal = document.getElementById('ctrl-bright-val-' + uid);
+      if (brightSlider) {
+        brightSlider.oninput = function() { brightVal.textContent = this.value + '%'; };
+        brightSlider.onchange = function() {
+          sendControl(uid, 'night_light_brightness', parseInt(this.value));
+        };
+      }
+
+      var nlTimerSel = document.getElementById('ctrl-nl-timer-' + uid);
+      if (nlTimerSel) nlTimerSel.onchange = function() {
+        sendControl(uid, 'night_light_timeout', parseInt(this.value));
+      };
+
       var volSlider = document.getElementById('ctrl-vol-' + uid);
       var volVal = document.getElementById('ctrl-vol-val-' + uid);
       if (volSlider) {
@@ -670,6 +703,11 @@
     } else {
       var nlBtnSync = document.getElementById('ctrl-nl-' + uid);
       if (nlBtnSync) nlBtnSync.classList.toggle('on', nlOn);
+      var brightSliderSync = document.getElementById('ctrl-bright-' + uid);
+      var brightValSync = document.getElementById('ctrl-bright-val-' + uid);
+      if (brightSliderSync) { brightSliderSync.value = nlBright; brightValSync.textContent = nlBright + '%'; }
+      var nlTimerSync = document.getElementById('ctrl-nl-timer-' + uid);
+      if (nlTimerSync) nlTimerSync.value = nlTimeout;
       var pbBtnSync = document.getElementById('ctrl-pb-' + uid);
       if (pbBtnSync) pbBtnSync.classList.toggle('on', pbOn);
       var trackSelSync = document.getElementById('ctrl-track-' + uid);

@@ -125,6 +125,16 @@ func (m *Manager) SetNightLightTimeout(babyUID string, seconds int) error {
 	return mb.client.SetNightLightTimeout(seconds)
 }
 
+func (m *Manager) SetNightLightBrightness(babyUID string, level int) error {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("baby %q not found", babyUID)
+	}
+	return mb.client.SetNightLightBrightness(level)
+}
+
 func (m *Manager) SetPlayback(babyUID string, on bool) error {
 	m.mu.Lock()
 	mb, ok := m.babies[babyUID]
@@ -291,6 +301,9 @@ func (m *Manager) startBaby(b nanit.Baby) {
 		state.UpdateControls(func(c *ControlState) {
 			if settings.Volume != nil {
 				c.Volume = int(settings.GetVolume())
+			}
+			if settings.NightLightBrightness != nil {
+				c.NightLightBrightness = int(settings.GetNightLightBrightness())
 			}
 			for _, s := range settings.GetSensors() {
 				switch s.GetSensorType() {

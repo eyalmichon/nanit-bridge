@@ -389,12 +389,17 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 		}
 
 	case pb.RequestType_PUT_STREAMING:
-		if resp.GetStatusCode() == 200 && c.onStreaming != nil {
-			started := pb.Streaming_STARTED
-			c.onStreaming(StreamingUpdate{
-				CameraUID: c.cameraUID,
-				Streaming: &pb.Streaming{Status: &started},
-			})
+		if resp.GetStatusCode() == 200 {
+			if c.onStreaming != nil {
+				started := pb.Streaming_STARTED
+				c.onStreaming(StreamingUpdate{
+					CameraUID: c.cameraUID,
+					Streaming: &pb.Streaming{Status: &started},
+				})
+			}
+		} else {
+			log.Printf("[camera:%s] PUT_STREAMING failed: status=%d %s",
+				c.cameraUID, resp.GetStatusCode(), resp.GetStatusMessage())
 		}
 
 	default:
@@ -554,6 +559,18 @@ func (c *CameraClient) SetPlaybackTrack(on bool, trackName string) error {
 func (c *CameraClient) SetVolume(level int) error {
 	v := int32(level)
 	settings := &pb.Settings{Volume: &v}
+	err := c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
+		req.Settings = settings
+	})
+	if err == nil && c.onSettings != nil {
+		c.onSettings(settings)
+	}
+	return err
+}
+
+func (c *CameraClient) SetNightLightBrightness(level int) error {
+	v := int32(level)
+	settings := &pb.Settings{NightLightBrightness: &v}
 	err := c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
 		req.Settings = settings
 	})

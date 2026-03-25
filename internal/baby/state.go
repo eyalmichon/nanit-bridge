@@ -25,14 +25,15 @@ type SoundtrackInfo struct {
 }
 
 type ControlState struct {
-	NightLight        bool
-	NightLightTimeout int
-	Volume            int
-	PlaybackActive    bool
-	CurrentTrack      string
-	Soundtracks       []SoundtrackInfo
-	SoundSensitivity  int
-	MotionSensitivity int
+	NightLight           bool
+	NightLightBrightness int
+	NightLightTimeout    int
+	Volume               int
+	PlaybackActive       bool
+	CurrentTrack         string
+	Soundtracks          []SoundtrackInfo
+	SoundSensitivity     int
+	MotionSensitivity    int
 }
 
 type StreamState int

@@ -47,7 +47,7 @@ type TokenManager struct {
 
 func NewTokenManager(email, password, sessionFile string) *TokenManager {
 	return &TokenManager{
-		session: Session{Email: email},
+		session:  Session{Email: email},
 		password: password,
 		filePath: sessionFile,
 		client:   &http.Client{Timeout: 15 * time.Second},

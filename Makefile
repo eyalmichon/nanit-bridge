@@ -1,4 +1,4 @@
-.PHONY: setup generate build run clean
+.PHONY: setup generate build run run-debug clean
 
 setup: generate
 	go mod tidy
@@ -17,6 +17,9 @@ debug:
 
 run: build
 	./bin/nanit-bridge
+
+run-debug: debug
+	./bin/nanit-debug
 
 clean:
 	rm -rf bin/

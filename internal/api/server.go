@@ -183,6 +183,14 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, uid strin
 		}
 		err = s.manager.SetNightLightTimeout(uid, int(v))
 
+	case "night_light_brightness":
+		v, ok := body.Value.(float64)
+		if !ok {
+			http.Error(w, "value must be number (0-100)", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetNightLightBrightness(uid, int(v))
+
 	case "playback":
 		on, ok := body.Value.(bool)
 		if !ok {
@@ -412,9 +420,10 @@ func (s *Server) buildBabyJSON(uid string, state *baby.State) map[string]interfa
 			"last_update":      sensors.LastUpdate.Format(time.RFC3339),
 		},
 		"controls": map[string]interface{}{
-			"night_light":         controls.NightLight,
-			"night_light_timeout": controls.NightLightTimeout,
-			"volume":              controls.Volume,
+			"night_light":            controls.NightLight,
+			"night_light_brightness": controls.NightLightBrightness,
+			"night_light_timeout":    controls.NightLightTimeout,
+			"volume":                 controls.Volume,
 			"playback":            controls.PlaybackActive,
 			"current_track":       controls.CurrentTrack,
 			"soundtracks":         controls.Soundtracks,
