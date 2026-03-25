@@ -138,6 +138,66 @@
   .alert-dot.on { background: var(--amber); }
   .alert-dot.off { background: var(--muted); }
 
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.6rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+  .control-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.7rem;
+    background: var(--bg);
+    border-radius: 8px;
+    font-size: 0.8rem;
+  }
+  .control-item.wide { grid-column: 1 / -1; }
+  .control-label { color: var(--muted); font-size: 0.75rem; }
+
+  .toggle {
+    position: relative;
+    width: 36px; height: 20px;
+    background: var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.2s;
+    border: none;
+    padding: 0;
+  }
+  .toggle.on { background: var(--accent); }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 16px; height: 16px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+  .toggle.on::after { transform: translateX(16px); }
+
+  .volume-slider {
+    width: 100%;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .volume-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex: 1;
+  }
+  .volume-val {
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    min-width: 2em;
+    text-align: right;
+  }
+
   .last-update {
     font-size: 0.7rem; color: var(--muted);
     text-align: right; margin-top: 0.75rem;
@@ -248,6 +308,33 @@
     uids.forEach(function(uid) { updateCard(uid, null); });
   }
 
+  function sendControl(uid, action, value) {
+    fetch('/api/babies/' + uid + '/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: action, value: value })
+    }).catch(function(e) { console.error('control error:', e); });
+  }
+
+  // Track pending control states so sensor re-renders don't reset toggles
+  // before the camera confirms the new state.
+  var pendingControls = {};
+
+  function setPending(uid, key, value) {
+    if (!pendingControls[uid]) pendingControls[uid] = {};
+    pendingControls[uid][key] = { value: value, ts: Date.now() };
+  }
+
+  function getControlValue(uid, key, serverValue) {
+    var p = pendingControls[uid] && pendingControls[uid][key];
+    if (p && (Date.now() - p.ts) < 5000) {
+      return p.value;
+    }
+    // Server confirmed or timeout — clear pending.
+    if (p) delete pendingControls[uid][key];
+    return serverValue;
+  }
+
   function ensureCard(uid) {
     var card = babiesEl.querySelector('.card[data-uid="' + uid + '"]');
     if (!card) {
@@ -259,7 +346,10 @@
           '<video id="video-' + uid + '" muted autoplay playsinline></video>' +
           '<div class="video-overlay" id="overlay-' + uid + '">Stream not active</div>' +
         '</div>' +
-        '<div class="card-body" id="body-' + uid + '"></div>';
+        '<div class="card-body">' +
+          '<div id="info-' + uid + '"></div>' +
+          '<div id="controls-' + uid + '"></div>' +
+        '</div>';
       babiesEl.appendChild(card);
     }
     return card;
@@ -271,10 +361,18 @@
     emptyState.style.display = 'none';
 
     var card = ensureCard(uid);
-    var body = document.getElementById('body-' + uid);
+    var infoEl = document.getElementById('info-' + uid);
+    var controlsEl = document.getElementById('controls-' + uid);
     var overlay = document.getElementById('overlay-' + uid);
 
     var s = b.sensors || {};
+    var c = b.controls || {};
+
+    // Resolve effective control values (pending overrides server until confirmed).
+    var nlOn = getControlValue(uid, 'night_light', c.night_light);
+    var pbOn = getControlValue(uid, 'playback', c.playback);
+    var vol = getControlValue(uid, 'volume', c.volume || 0);
+
     var streamBadge = b.stream === 'active'
       ? '<span class="badge badge-green">stream active</span>'
       : b.stream === 'starting'
@@ -289,7 +387,8 @@
       ? new Date(s.last_update).toLocaleTimeString()
       : 'no data yet';
 
-    body.innerHTML =
+    // Update info section (sensors, alerts) — safe to rebuild.
+    infoEl.innerHTML =
       '<div class="card-header">' +
         '<div><h2>' + esc(b.name || uid) + '</h2>' +
         '<div class="uid">' + esc(uid) + '</div></div>' +
@@ -307,10 +406,71 @@
       '</div>' +
       '<div class="last-update">Last update: ' + lastUpdate + '</div>';
 
-    card.classList.add('updating');
-    setTimeout(function() { card.classList.remove('updating'); }, 400);
+    // Update controls — only rebuild if no existing controls or control state changed.
+    var controlsChanged = !prev ||
+      !prev.controls ||
+      prev.controls.night_light !== c.night_light ||
+      prev.controls.playback !== c.playback ||
+      prev.controls.volume !== c.volume;
 
-    // Use rtmp_active (actual RTMP publisher presence) as source of truth.
+    if (!controlsEl.hasChildNodes() || controlsChanged) {
+      // Full rebuild of controls section.
+      controlsEl.innerHTML =
+        '<div class="controls">' +
+          '<div class="control-item">' +
+            '<span class="control-label">Night Light</span>' +
+            '<button class="toggle ' + (nlOn ? 'on' : '') + '" id="ctrl-nl-' + uid + '"></button>' +
+          '</div>' +
+          '<div class="control-item">' +
+            '<span class="control-label">Sound Machine</span>' +
+            '<button class="toggle ' + (pbOn ? 'on' : '') + '" id="ctrl-pb-' + uid + '"></button>' +
+          '</div>' +
+          '<div class="control-item wide">' +
+            '<span class="control-label">Volume</span>' +
+            '<div class="volume-row">' +
+              '<input type="range" class="volume-slider" id="ctrl-vol-' + uid + '" min="0" max="100" value="' + vol + '">' +
+              '<span class="volume-val" id="ctrl-vol-val-' + uid + '">' + vol + '</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+
+      var nlBtn = document.getElementById('ctrl-nl-' + uid);
+      if (nlBtn) nlBtn.onclick = function() {
+        var cur = this.classList.contains('on');
+        var newVal = !cur;
+        setPending(uid, 'night_light', newVal);
+        sendControl(uid, 'night_light', newVal);
+        this.classList.toggle('on', newVal);
+      };
+
+      var pbBtn = document.getElementById('ctrl-pb-' + uid);
+      if (pbBtn) pbBtn.onclick = function() {
+        var cur = this.classList.contains('on');
+        var newVal = !cur;
+        setPending(uid, 'playback', newVal);
+        sendControl(uid, 'playback', newVal);
+        this.classList.toggle('on', newVal);
+      };
+
+      var volSlider = document.getElementById('ctrl-vol-' + uid);
+      var volVal = document.getElementById('ctrl-vol-val-' + uid);
+      if (volSlider) {
+        volSlider.oninput = function() { volVal.textContent = this.value; };
+        volSlider.onchange = function() {
+          var v = parseInt(this.value);
+          setPending(uid, 'volume', v);
+          sendControl(uid, 'volume', v);
+        };
+      }
+    } else {
+      // No full rebuild, but still sync toggle visuals with server state
+      // so external changes (e.g. from the Nanit app) are reflected.
+      var nlBtnSync = document.getElementById('ctrl-nl-' + uid);
+      if (nlBtnSync) nlBtnSync.classList.toggle('on', nlOn);
+      var pbBtnSync = document.getElementById('ctrl-pb-' + uid);
+      if (pbBtnSync) pbBtnSync.classList.toggle('on', pbOn);
+    }
+
     var isActive = b.rtmp_active || b.stream === 'active';
 
     if (isActive && !players[uid]) {

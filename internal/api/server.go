@@ -52,7 +52,7 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/babies", s.handleBabies)
-	mux.HandleFunc("/api/babies/", s.handleBaby)
+	mux.HandleFunc("/api/babies/", s.handleBabyOrControl)
 	mux.HandleFunc("/api/stream/", s.handleStreamFLV)
 	mux.HandleFunc("/ws", s.handleWS)
 
@@ -120,21 +120,91 @@ func (s *Server) handleBabies(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleBaby(w http.ResponseWriter, r *http.Request) {
-	uid := strings.TrimPrefix(r.URL.Path, "/api/babies/")
-	if uid == "" {
-		http.Error(w, "missing baby uid", http.StatusBadRequest)
+func (s *Server) handleBabyOrControl(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/babies/")
+
+	if strings.Contains(path, "/control") {
+		uid := strings.TrimSuffix(path, "/control")
+		s.handleControl(w, r, uid)
 		return
 	}
 
-	state := s.manager.GetState(uid)
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	state := s.manager.GetState(path)
 	if state == nil {
 		http.Error(w, "baby not found", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.buildBabyJSON(uid, state))
+	json.NewEncoder(w).Encode(s.buildBabyJSON(path, state))
+}
+
+func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, uid string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Action string      `json:"action"`
+		Value  interface{} `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	var err error
+	switch body.Action {
+	case "night_light":
+		on, ok := body.Value.(bool)
+		if !ok {
+			http.Error(w, "value must be boolean", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetNightLight(uid, on)
+
+	case "night_light_timeout":
+		v, ok := body.Value.(float64)
+		if !ok {
+			http.Error(w, "value must be number", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetNightLightTimeout(uid, int(v))
+
+	case "playback":
+		on, ok := body.Value.(bool)
+		if !ok {
+			http.Error(w, "value must be boolean", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetPlayback(uid, on)
+
+	case "volume":
+		v, ok := body.Value.(float64)
+		if !ok {
+			http.Error(w, "value must be number", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetVolume(uid, int(v))
+
+	default:
+		http.Error(w, "unknown action: "+body.Action, http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -247,7 +317,7 @@ func (s *Server) handleStreamFLV(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) buildBabyJSON(uid string, state *baby.State) map[string]interface{} {
-	sensors, stream, wsAlive := state.Snapshot()
+	sensors, controls, stream, wsAlive := state.Snapshot()
 	return map[string]interface{}{
 		"uid":         uid,
 		"camera_uid":  state.CameraUID,
@@ -263,6 +333,12 @@ func (s *Server) buildBabyJSON(uid string, state *baby.State) map[string]interfa
 			"sound_alert":  sensors.SoundAlert,
 			"motion_alert": sensors.MotionAlert,
 			"last_update":  sensors.LastUpdate.Format(time.RFC3339),
+		},
+		"controls": map[string]interface{}{
+			"night_light":         controls.NightLight,
+			"night_light_timeout": controls.NightLightTimeout,
+			"volume":              controls.Volume,
+			"playback":            controls.PlaybackActive,
 		},
 	}
 }

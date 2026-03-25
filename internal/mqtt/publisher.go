@@ -72,7 +72,7 @@ func (p *Publisher) PublishState(babyUID string, state *baby.State) {
 		return
 	}
 
-	sensors, stream, wsAlive := state.Snapshot()
+	sensors, _, stream, wsAlive := state.Snapshot()
 
 	p.pub(babyUID, "temperature", fmt.Sprintf("%.1f", sensors.Temperature))
 	p.pub(babyUID, "humidity", fmt.Sprintf("%.1f", sensors.Humidity))

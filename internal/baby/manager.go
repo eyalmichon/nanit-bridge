@@ -75,6 +75,46 @@ func (m *Manager) GetState(babyUID string) *State {
 	return nil
 }
 
+func (m *Manager) SetNightLight(babyUID string, on bool) error {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("baby %q not found", babyUID)
+	}
+	return mb.client.SetNightLight(on)
+}
+
+func (m *Manager) SetNightLightTimeout(babyUID string, seconds int) error {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("baby %q not found", babyUID)
+	}
+	return mb.client.SetNightLightTimeout(seconds)
+}
+
+func (m *Manager) SetPlayback(babyUID string, on bool) error {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("baby %q not found", babyUID)
+	}
+	return mb.client.SetPlayback(on)
+}
+
+func (m *Manager) SetVolume(babyUID string, level int) error {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("baby %q not found", babyUID)
+	}
+	return mb.client.SetVolume(level)
+}
+
 func (m *Manager) AllStates() map[string]*State {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -108,6 +148,31 @@ func (m *Manager) startBaby(b nanit.Baby) {
 		case pb.Streaming_PAUSED:
 			state.SetStreamState(StreamUnhealthy)
 		}
+	})
+
+	client.OnPlayback(func(active bool) {
+		state.UpdateControls(func(c *ControlState) {
+			c.PlaybackActive = active
+		})
+	})
+
+	client.OnControl(func(ctrl *pb.Control) {
+		state.UpdateControls(func(c *ControlState) {
+			if ctrl.NightLight != nil {
+				c.NightLight = ctrl.GetNightLight() == pb.Control_LIGHT_ON
+			}
+			if ctrl.NightLightTimeout != nil {
+				c.NightLightTimeout = int(ctrl.GetNightLightTimeout())
+			}
+		})
+	})
+
+	client.OnSettings(func(settings *pb.Settings) {
+		state.UpdateControls(func(c *ControlState) {
+			if settings.Volume != nil {
+				c.Volume = int(settings.GetVolume())
+			}
+		})
 	})
 
 	if m.onStateChange != nil {

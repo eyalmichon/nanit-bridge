@@ -15,6 +15,13 @@ type SensorState struct {
 	LastUpdate  time.Time
 }
 
+type ControlState struct {
+	NightLight        bool
+	NightLightTimeout int
+	Volume            int
+	PlaybackActive    bool
+}
+
 type StreamState int
 
 const (
@@ -46,6 +53,7 @@ type State struct {
 	CameraUID  string
 	Name       string
 	Sensors    SensorState
+	Controls   ControlState
 	Stream     StreamState
 	WSAlive    bool
 
@@ -100,8 +108,19 @@ func (s *State) SetWSAlive(alive bool) {
 	}
 }
 
-func (s *State) Snapshot() (SensorState, StreamState, bool) {
+func (s *State) UpdateControls(fn func(*ControlState)) {
+	s.mu.Lock()
+	fn(&s.Controls)
+	subs := append([]func(){}, s.subscribers...)
+	s.mu.Unlock()
+
+	for _, sub := range subs {
+		sub()
+	}
+}
+
+func (s *State) Snapshot() (SensorState, ControlState, StreamState, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.Sensors, s.Stream, s.WSAlive
+	return s.Sensors, s.Controls, s.Stream, s.WSAlive
 }
