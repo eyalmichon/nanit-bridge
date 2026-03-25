@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -29,6 +31,8 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
+	// Best-effort: load .env if present, don't override existing env vars.
+	_ = godotenv.Load()
 	c := &Config{
 		NanitEmail:    os.Getenv("NANIT_EMAIL"),
 		NanitPassword: os.Getenv("NANIT_PASSWORD"),

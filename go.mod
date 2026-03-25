@@ -11,6 +11,7 @@ require (
 
 require (
 	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/morhaviv/go-fcm-receiver v1.2.0 // indirect
 	github.com/xakep666/ecego v0.1.3 // indirect
 	golang.org/x/crypto v0.49.0 // indirect
