@@ -239,6 +239,18 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, uid strin
 		}
 		err = s.manager.SetMotionSensitivity(uid, int(v))
 
+	case "breathing_monitoring":
+		on, ok := body.Value.(bool)
+		if !ok {
+			http.Error(w, "value must be boolean", http.StatusBadRequest)
+			return
+		}
+		if on {
+			err = s.manager.StartBreathingMonitoring(uid)
+		} else {
+			err = s.manager.StopBreathingMonitoring(uid)
+		}
+
 	default:
 		http.Error(w, "unknown action: "+body.Action, http.StatusBadRequest)
 		return
@@ -429,6 +441,11 @@ func (s *Server) buildBabyJSON(uid string, state *baby.State) map[string]interfa
 			"soundtracks":         controls.Soundtracks,
 			"sound_sensitivity":   controls.SoundSensitivity,
 			"motion_sensitivity":  controls.MotionSensitivity,
+			"breathing": map[string]interface{}{
+				"active":          controls.Breathing.Active,
+				"calibrating":     controls.Breathing.Calibrating,
+				"breaths_per_min": controls.Breathing.BreathsPerMin,
+			},
 		},
 	}
 }

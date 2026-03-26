@@ -234,6 +234,31 @@ message GetStatus {
   optional bool all = 1;
 }
 
+message StingStatus {
+  enum State {
+    STARTING = 1;
+    MONITORING = 2;
+    STOPPED = 6;
+  }
+
+  optional State state = 1;
+  optional int32 type = 2;
+  optional bool enabled = 3;
+  optional bool field4 = 4;
+  optional string stop_reason = 7;
+  optional int64 timestamp = 8;
+  optional string session_id = 9;
+  optional int32 breaths_per_min = 10;
+  optional bool calibrating = 11;
+  optional string token = 12;
+  optional int32 sample_count = 13;
+  optional int64 start_timestamp = 14;
+  optional string user_id = 16;
+  optional bool field17 = 17;
+  optional float breathing_score = 18;
+  optional float motion_score = 19;
+}
+
 message Request {
   required int32 id = 1;
   required RequestType type = 2;
@@ -248,6 +273,7 @@ message Request {
   optional Playback playback = 16;
   optional GetControl get_control = 17;
   optional GetLogs get_logs = 18;
+  optional StingStatus sting_status = 23;
 }
 
 message Response {
@@ -262,6 +288,7 @@ message Response {
   optional Playback playback = 11;
   repeated Soundtrack soundtracks = 12;
   optional Control control = 13;
+  optional StingStatus sting_status = 21;
 }
 
 message Message {

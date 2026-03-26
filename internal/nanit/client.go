@@ -53,11 +53,14 @@ type CameraClient struct {
 	onControl       func(*pb.Control)
 	onPlaybackState func(*pb.Playback)
 	onSoundtracks   func([]*pb.Soundtrack)
+	onStingStatus   func(*pb.StingStatus)
 	onConnect       func()
 	onDisconnect    func()
 
-	done chan struct{}
-	wg   sync.WaitGroup
+	done           chan struct{}
+	wg             sync.WaitGroup
+	streamRetryMu  sync.Mutex
+	streamRetrying bool
 }
 
 func NewCameraClient(cameraUID, babyUID string, tokenMgr *TokenManager, rtmpURL string, sensorPollSec int) *CameraClient {
@@ -93,8 +96,9 @@ func (c *CameraClient) OnSettings(fn func(*pb.Settings))       { c.onSettings = 
 func (c *CameraClient) OnControl(fn func(*pb.Control))         { c.onControl = fn }
 func (c *CameraClient) OnPlaybackState(fn func(*pb.Playback))  { c.onPlaybackState = fn }
 func (c *CameraClient) OnSoundtracks(fn func([]*pb.Soundtrack)) { c.onSoundtracks = fn }
-func (c *CameraClient) OnConnect(fn func())                    { c.onConnect = fn }
-func (c *CameraClient) OnDisconnect(fn func())                 { c.onDisconnect = fn }
+func (c *CameraClient) OnStingStatus(fn func(*pb.StingStatus))  { c.onStingStatus = fn }
+func (c *CameraClient) OnConnect(fn func())                     { c.onConnect = fn }
+func (c *CameraClient) OnDisconnect(fn func())                  { c.onDisconnect = fn }
 
 
 func (c *CameraClient) Start() {
@@ -191,6 +195,7 @@ func (c *CameraClient) connect() error {
 		{"sensor push", c.enableSensorPush},
 		{"playback state", c.RequestPlayback},
 		{"soundtracks", c.RequestSoundtracks},
+		{"sting status", c.RequestStingStatus},
 	}
 	for _, r := range initRequests {
 		if err := r.fn(); err != nil {
@@ -199,6 +204,7 @@ func (c *CameraClient) connect() error {
 	}
 	if err := c.startStreaming(); err != nil {
 		log.Printf("[camera:%s] failed to start streaming: %v", c.cameraUID, err)
+		c.scheduleStreamRetry()
 	}
 
 	var result error
@@ -346,8 +352,12 @@ func (c *CameraClient) handleRequest(req *pb.Request) {
 			})
 		}
 
+	case pb.RequestType_PUT_STING_STATUS:
+		if c.onStingStatus != nil && req.GetStingStatus() != nil {
+			c.onStingStatus(req.GetStingStatus())
+		}
+
 	default:
-		// Silently ignore unknown push types (e.g. PUT_STING_STATUS = 50).
 	}
 }
 
@@ -388,8 +398,22 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 			c.onSoundtracks(resp.GetSoundtracks())
 		}
 
+	case pb.RequestType_GET_STING_STATUS:
+		if c.onStingStatus != nil && resp.GetStingStatus() != nil {
+			c.onStingStatus(resp.GetStingStatus())
+		}
+
+	case pb.RequestType_PUT_STING_START, pb.RequestType_PUT_STING_STOP:
+		if resp.GetStatusCode() != 200 {
+			log.Printf("[camera:%s] %v: status=%d %s",
+				c.cameraUID, resp.GetRequestType(), resp.GetStatusCode(), resp.GetStatusMessage())
+		}
+
 	case pb.RequestType_PUT_STREAMING:
 		if resp.GetStatusCode() == 200 {
+			c.streamRetryMu.Lock()
+			c.streamRetrying = false
+			c.streamRetryMu.Unlock()
 			if c.onStreaming != nil {
 				started := pb.Streaming_STARTED
 				c.onStreaming(StreamingUpdate{
@@ -453,6 +477,10 @@ func (c *CameraClient) startStreaming() error {
 }
 
 func (c *CameraClient) stopStreaming() {
+	c.streamRetryMu.Lock()
+	c.streamRetrying = false
+	c.streamRetryMu.Unlock()
+
 	empty := ""
 	_ = c.sendRequest(pb.RequestType_PUT_STREAMING, func(req *pb.Request) {
 		stopped := pb.Streaming_STOPPED
@@ -463,6 +491,60 @@ func (c *CameraClient) stopStreaming() {
 			RtmpUrl: &empty,
 		}
 	})
+}
+
+func (c *CameraClient) scheduleStreamRetry() {
+	c.streamRetryMu.Lock()
+	if c.streamRetrying {
+		c.streamRetryMu.Unlock()
+		return
+	}
+	c.streamRetrying = true
+	c.streamRetryMu.Unlock()
+
+	go c.streamRetryLoop()
+}
+
+func (c *CameraClient) streamRetryLoop() {
+	log.Printf("[camera:%s] stream unavailable, retrying every 5s...", c.cameraUID)
+
+	for attempt := 1; ; attempt++ {
+		select {
+		case <-c.done:
+			return
+		case <-time.After(5 * time.Second):
+		}
+
+		c.streamRetryMu.Lock()
+		if !c.streamRetrying {
+			c.streamRetryMu.Unlock()
+			return
+		}
+		c.streamRetryMu.Unlock()
+
+		if err := c.startStreaming(); err != nil {
+			log.Printf("[camera:%s] stream retry send failed: %v", c.cameraUID, err)
+			c.streamRetryMu.Lock()
+			c.streamRetrying = false
+			c.streamRetryMu.Unlock()
+			return
+		}
+
+		// Wait for the async response.
+		select {
+		case <-c.done:
+			return
+		case <-time.After(3 * time.Second):
+		}
+
+		c.streamRetryMu.Lock()
+		still := c.streamRetrying
+		c.streamRetryMu.Unlock()
+		if !still {
+			log.Printf("[camera:%s] stream recovered on attempt %d", c.cameraUID, attempt)
+			return
+		}
+	}
 }
 
 func (c *CameraClient) requestSensorData() error {
@@ -644,6 +726,17 @@ func (c *CameraClient) RequestSoundtracks() error {
 	return c.sendRequest(pb.RequestType_GET_SOUNDTRACKS, nil)
 }
 
+func (c *CameraClient) RequestStingStatus() error {
+	return c.sendRequest(pb.RequestType_GET_STING_STATUS, nil)
+}
+
+func (c *CameraClient) StartBreathingMonitoring() error {
+	return c.sendRequest(pb.RequestType_PUT_STING_START, nil)
+}
+
+func (c *CameraClient) StopBreathingMonitoring() error {
+	return c.sendRequest(pb.RequestType_PUT_STING_STOP, nil)
+}
 
 // backoff computes delay with exponential backoff + jitter, capped at maxBackoff.
 func backoff(attempt int) time.Duration {

@@ -135,6 +135,26 @@ func (m *Manager) SetNightLightBrightness(babyUID string, level int) error {
 	return mb.client.SetNightLightBrightness(level)
 }
 
+func (m *Manager) StartBreathingMonitoring(babyUID string) error {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("baby %q not found", babyUID)
+	}
+	return mb.client.StartBreathingMonitoring()
+}
+
+func (m *Manager) StopBreathingMonitoring(babyUID string) error {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("baby %q not found", babyUID)
+	}
+	return mb.client.StopBreathingMonitoring()
+}
+
 func (m *Manager) SetPlayback(babyUID string, on bool) error {
 	m.mu.Lock()
 	mb, ok := m.babies[babyUID]
@@ -316,6 +336,27 @@ func (m *Manager) startBaby(b nanit.Baby) {
 						c.MotionSensitivity = int(s.GetHighThreshold())
 					}
 				}
+			}
+		})
+	})
+
+	client.OnStingStatus(func(ss *pb.StingStatus) {
+		state.UpdateControls(func(c *ControlState) {
+			switch ss.GetState() {
+			case pb.StingStatus_STARTING:
+				c.Breathing.Active = true
+				c.Breathing.Calibrating = true
+				c.Breathing.BreathsPerMin = 0
+			case pb.StingStatus_MONITORING:
+				c.Breathing.Active = true
+				c.Breathing.Calibrating = false
+				c.Breathing.BreathsPerMin = int(ss.GetBreathsPerMin())
+				c.Breathing.BreathingScore = ss.GetBreathingScore()
+				c.Breathing.MotionScore = ss.GetMotionScore()
+			case pb.StingStatus_STOPPED:
+				c.Breathing.Active = false
+				c.Breathing.Calibrating = false
+				c.Breathing.BreathsPerMin = 0
 			}
 		})
 	})

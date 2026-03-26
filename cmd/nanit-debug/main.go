@@ -115,6 +115,8 @@ func main() {
 		req.GetStatus_ = &pb.GetStatus{All: &all}
 	})
 
+	sendDebugRequest(conn, 6, pb.RequestType_GET_STING_STATUS, nil)
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

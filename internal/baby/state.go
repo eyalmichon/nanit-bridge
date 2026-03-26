@@ -24,6 +24,14 @@ type SoundtrackInfo struct {
 	Category int    `json:"category"`
 }
 
+type BreathingState struct {
+	Active         bool
+	Calibrating    bool
+	BreathsPerMin  int
+	BreathingScore float32
+	MotionScore    float32
+}
+
 type ControlState struct {
 	NightLight           bool
 	NightLightBrightness int
@@ -34,6 +42,7 @@ type ControlState struct {
 	Soundtracks          []SoundtrackInfo
 	SoundSensitivity     int
 	MotionSensitivity    int
+	Breathing            BreathingState
 }
 
 type StreamState int
