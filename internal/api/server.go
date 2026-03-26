@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -25,27 +26,114 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+const logRingSize = 200
+
+// LogBroadcaster is an io.Writer that buffers log lines in a ring buffer and
+// broadcasts them to registered listener functions. It can be created before the
+// Server exists and wired in later.
+type LogBroadcaster struct {
+	mu        sync.Mutex
+	ring      []string
+	buf       []byte
+	listeners []func([]byte)
+}
+
+func NewLogBroadcaster() *LogBroadcaster {
+	return &LogBroadcaster{}
+}
+
+func (lb *LogBroadcaster) Write(p []byte) (int, error) {
+	n, err := os.Stderr.Write(p)
+
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	lb.buf = append(lb.buf, p...)
+	for {
+		idx := -1
+		for i, b := range lb.buf {
+			if b == '\n' {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			break
+		}
+		line := string(lb.buf[:idx])
+		lb.buf = lb.buf[idx+1:]
+		if line == "" {
+			continue
+		}
+
+		lb.ring = append(lb.ring, line)
+		if len(lb.ring) > logRingSize {
+			lb.ring = lb.ring[len(lb.ring)-logRingSize:]
+		}
+
+		data, _ := json.Marshal(map[string]string{"type": "log", "line": line})
+		for _, fn := range lb.listeners {
+			fn(data)
+		}
+	}
+
+	return n, err
+}
+
+func (lb *LogBroadcaster) addListener(fn func([]byte)) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	lb.listeners = append(lb.listeners, fn)
+}
+
+func (lb *LogBroadcaster) snapshot() []string {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	out := make([]string, len(lb.ring))
+	copy(out, lb.ring)
+	return out
+}
+
 type Server struct {
 	port       int
 	manager    *baby.Manager
 	rtmpServer *rtmpserver.Server
+	logBcast   *LogBroadcaster
 
 	mu      sync.Mutex
 	clients map[*wsClient]struct{}
 }
 
 type wsClient struct {
-	conn *websocket.Conn
-	send chan []byte
+	conn   *websocket.Conn
+	send   chan []byte
+	closed bool
 }
 
-func NewServer(port int, manager *baby.Manager, rtmpServer *rtmpserver.Server) *Server {
-	return &Server{
+func NewServer(port int, manager *baby.Manager, rtmpServer *rtmpserver.Server, logBcast *LogBroadcaster) *Server {
+	s := &Server{
 		port:       port,
 		manager:    manager,
 		rtmpServer: rtmpServer,
+		logBcast:   logBcast,
 		clients:    make(map[*wsClient]struct{}),
 	}
+
+	logBcast.addListener(func(data []byte) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for c := range s.clients {
+			if c.closed {
+				continue
+			}
+			select {
+			case c.send <- data:
+			default:
+			}
+		}
+	})
+
+	return s
 }
 
 func (s *Server) Start() error {
@@ -60,7 +148,11 @@ func (s *Server) Start() error {
 	if err != nil {
 		return fmt.Errorf("embed static: %w", err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+	fileServer := http.FileServer(http.FS(staticFS))
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		fileServer.ServeHTTP(w, r)
+	}))
 
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("[api] dashboard at http://0.0.0.0%s", addr)
@@ -93,9 +185,13 @@ func (s *Server) BroadcastState(babyUID string, state *baby.State) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for c := range s.clients {
+		if c.closed {
+			continue
+		}
 		select {
 		case c.send <- data:
 		default:
+			c.closed = true
 			close(c.send)
 			delete(s.clients, c)
 		}
@@ -326,6 +422,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	})
 	client.send <- initial
 
+	// Send buffered log lines.
+	if lines := s.logBcast.snapshot(); len(lines) > 0 {
+		logInit, _ := json.Marshal(map[string]interface{}{
+			"type":  "log_init",
+			"lines": lines,
+		})
+		client.send <- logInit
+	}
+
 	go s.wsWriter(client)
 	s.wsReader(client)
 }
@@ -343,7 +448,10 @@ func (s *Server) wsReader(c *wsClient) {
 	defer func() {
 		s.mu.Lock()
 		delete(s.clients, c)
-		close(c.send)
+		if !c.closed {
+			c.closed = true
+			close(c.send)
+		}
 		s.mu.Unlock()
 		c.conn.Close()
 	}()
@@ -408,7 +516,7 @@ func (s *Server) handleStreamFLV(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) buildBabyJSON(uid string, state *baby.State) map[string]interface{} {
-	sensors, controls, stream, wsAlive := state.Snapshot()
+	sensors, controls, camera, stream, wsAlive := state.Snapshot()
 	return map[string]interface{}{
 		"uid":         uid,
 		"camera_uid":  state.CameraUID,
@@ -446,6 +554,11 @@ func (s *Server) buildBabyJSON(uid string, state *baby.State) map[string]interfa
 				"calibrating":     controls.Breathing.Calibrating,
 				"breaths_per_min": controls.Breathing.BreathsPerMin,
 			},
+		},
+		"camera": map[string]interface{}{
+			"firmware_version": camera.FirmwareVersion,
+			"hardware_version": camera.HardwareVersion,
+			"mounting_mode":    camera.MountingMode,
 		},
 	}
 }

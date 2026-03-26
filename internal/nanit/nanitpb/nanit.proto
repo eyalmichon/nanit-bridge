@@ -180,6 +180,7 @@ message Status {
   optional bool is_security_upgrade = 5;
   optional string downloaded_version = 6;
   optional string hardware_version = 7;
+  optional int32 mount_adc_value = 8;
 }
 
 message Playback {
@@ -226,6 +227,12 @@ message Streaming {
   optional int32 attempts = 4;
 }
 
+message Firmware {
+  required string url = 1;
+  required string version = 2;
+  optional bool is_security_upgrade = 3;
+}
+
 message GetLogs {
   required string url = 1;
 }
@@ -236,27 +243,80 @@ message GetStatus {
 
 message StingStatus {
   enum State {
-    STARTING = 1;
-    MONITORING = 2;
-    STOPPED = 6;
+    OFF = 0;
+    INITING = 1;
+    RUNNING = 2;
+    PAUSED = 3;
+    RESUMING = 4;
+    INIT_FAILED = 5;
+    COMPLETED = 6;
+    ABORTED = 7;
+    STALE = 8;
+    COMPLETED_AFTER_INIT_FAILED = 9;
+    COMPLETED_AFTER_BABY_NOT_IN_BED = 10;
+  }
+
+  enum Breathing {
+    LACK_TEXTURE = 0;
+    NORMAL = 1;
+    WIGGLING = 2;
+    NO_PATTERN = 3;
+    NO_BREATHING = 4;
+    LOW_BPM = 5;
+    HIGH_BPM = 6;
+    INIT = 7;
+    PATTERN_FOUND = 8;
+    BABY_NOT_IN_BED = 9;
   }
 
   optional State state = 1;
-  optional int32 type = 2;
-  optional bool enabled = 3;
-  optional bool field4 = 4;
-  optional string stop_reason = 7;
-  optional int64 timestamp = 8;
-  optional string session_id = 9;
+  optional Breathing breathing = 2;
+  optional bool streaming_on = 3;
+  optional bool server_connected = 4;
+  optional Point win_location = 5;
+  optional Point pattern_location = 6;
+  optional string status_msg = 7;
+  optional uint64 timestamp = 8;
+  optional string event_id = 9;
   optional int32 breaths_per_min = 10;
-  optional bool calibrating = 11;
-  optional string token = 12;
-  optional int32 sample_count = 13;
-  optional int64 start_timestamp = 14;
-  optional string user_id = 16;
-  optional bool field17 = 17;
-  optional float breathing_score = 18;
-  optional float motion_score = 19;
+  optional EStingMode mode = 11;
+  optional string session_id = 12;
+  optional uint32 sting_version = 13;
+  optional uint64 event_timestamp = 14;
+  optional string stopped_by_user_id = 16;
+  optional bool red_after_yellow = 17;
+  optional float max_cma = 18;
+  optional float max_response = 19;
+}
+
+enum EStingMode {
+  GREEN = 0;
+  YELLOW = 1;
+  RED = 2;
+}
+
+message StingStart {
+  optional bool display_data = 1;
+  optional string remote_server = 2;
+  optional int32 port_in_win = 3;
+  optional int32 port_in_full = 4;
+  optional Point win_location = 5;
+  optional uint32 age = 6;
+  optional double sensitivity = 7;
+  optional string session_id = 8;
+  optional Point crib_center = 9;
+  optional Area crib_area = 10;
+  optional bool enable_baby_not_in_bed = 11;
+}
+
+message Point {
+  required int32 x = 1;
+  required int32 y = 2;
+}
+
+message Area {
+  required int32 width = 1;
+  required int32 height = 2;
 }
 
 message Request {
@@ -269,10 +329,12 @@ message Request {
   optional GetStatus get_status = 8;
   optional GetSensorData get_sensor_data = 12;
   repeated SensorData sensor_data = 13;
+  optional Firmware firmware = 14;
   optional Control control = 15;
   optional Playback playback = 16;
   optional GetControl get_control = 17;
   optional GetLogs get_logs = 18;
+  optional StingStart sting_start = 22;
   optional StingStatus sting_status = 23;
 }
 
@@ -285,10 +347,12 @@ message Response {
   optional Status status = 5;
   optional Settings settings = 6;
   repeated SensorData sensor_data = 9;
+  optional Firmware firmware = 10;
   optional Playback playback = 11;
   repeated Soundtrack soundtracks = 12;
   optional Control control = 13;
   optional StingStatus sting_status = 21;
+  optional GetLogs logs_uri = 27;
 }
 
 message Message {

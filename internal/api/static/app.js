@@ -46,6 +46,10 @@
         var prev = babies[msg.baby.uid];
         babies[msg.baby.uid] = msg.baby;
         updateCard(msg.baby.uid, prev);
+      } else if (msg.type === 'log_init') {
+        appendLogLines(msg.lines || []);
+      } else if (msg.type === 'log') {
+        appendLogLine(msg.line);
       }
     };
   }
@@ -65,11 +69,14 @@
   // ── API helpers ────────────────────────────────────────
 
   function sendControl(uid, action, value) {
-    fetch('/api/babies/' + uid + '/control', {
+    return fetch('/api/babies/' + uid + '/control', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: action, value: value })
-    }).catch(function(e) { console.error('control error:', e); });
+    }).then(function(r) {
+      if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+      return r;
+    });
   }
 
   function fetchNotifSettings(uid) {
@@ -164,10 +171,18 @@
     pendingControls[uid][key] = { value: value, ts: Date.now() };
   }
 
+  function getPending(uid, key) {
+    return pendingControls[uid] && pendingControls[uid][key];
+  }
+
+  function clearPending(uid, key) {
+    if (pendingControls[uid]) delete pendingControls[uid][key];
+  }
+
   function getControlValue(uid, key, serverValue) {
-    var p = pendingControls[uid] && pendingControls[uid][key];
+    var p = getPending(uid, key);
     if (p && (Date.now() - p.ts) < 5000) return p.value;
-    if (p) delete pendingControls[uid][key];
+    if (p) clearPending(uid, key);
     return serverValue;
   }
 
@@ -265,6 +280,8 @@
     var soundSlider = Math.max(0, Math.min(7, 9 - soundSensRaw));
     var motionSlider = Math.max(0, Math.min(24, Math.round((250000 - motionSensRaw) / 10000)));
 
+    var cam = b.camera || {};
+
     var controlsChanged = !prev || !prev.controls ||
       prev.controls.night_light !== c.night_light ||
       prev.controls.playback !== c.playback ||
@@ -278,7 +295,8 @@
         pbOn: pbOn, vol: vol, tracks: tracks, curTrack: curTrack,
         brActive: brActive, brCalibrating: brCalibrating, brBpm: brBpm,
         brStatusText: brStatusText, pollSec: pollSec,
-        s: s, soundSlider: soundSlider, motionSlider: motionSlider
+        s: s, soundSlider: soundSlider, motionSlider: motionSlider,
+        cam: cam
       });
     } else {
       syncControls(uid, {
@@ -287,7 +305,7 @@
         brActive: brActive, brCalibrating: brCalibrating, brBpm: brBpm,
         brStatusText: brStatusText,
         soundSlider: soundSlider, motionSlider: motionSlider,
-        s: s
+        s: s, cam: cam
       });
     }
 
@@ -391,6 +409,13 @@
           '</div>' +
         '</div>' +
 
+        '<div class="sec">' +
+          '<div class="sec-head"><span class="sec-title">Camera Info</span></div>' +
+          '<div id="camera-info-' + uid + '">' +
+            cameraInfoHtml(d.cam) +
+          '</div>' +
+        '</div>' +
+
       '</div>';
 
     wireEventHandlers(uid);
@@ -442,11 +467,28 @@
 
     var brBtn = document.getElementById('ctrl-br-' + uid);
     if (brBtn) brBtn.onclick = function() {
-      var newVal = !this.classList.contains('on');
-      sendControl(uid, 'breathing_monitoring', newVal);
-      this.classList.toggle('on', newVal);
+      var btn = this;
+      var oldVal = btn.classList.contains('on');
+      var newVal = !oldVal;
+      btn.classList.add('pending');
+      btn.classList.toggle('on', newVal);
       var statusEl = document.getElementById('ctrl-br-status-' + uid);
-      if (statusEl) statusEl.innerHTML = breathingStatusHtml(newVal, false, 0, newVal ? 'Starting\u2026' : 'Off');
+      if (statusEl) statusEl.innerHTML = breathingStatusHtml(newVal, false, 0, newVal ? 'Starting\u2026' : 'Stopping\u2026');
+      var revertTimer = setTimeout(function() {
+        if (btn.classList.contains('pending')) {
+          btn.classList.remove('pending');
+          btn.classList.toggle('on', oldVal);
+          if (statusEl) statusEl.innerHTML = breathingStatusHtml(oldVal, false, 0, oldVal ? '' : 'Off');
+        }
+      }, 8000);
+      setPending(uid, 'breathing', { timer: revertTimer });
+      sendControl(uid, 'breathing_monitoring', newVal).catch(function() {
+        clearTimeout(revertTimer);
+        btn.classList.remove('pending');
+        btn.classList.toggle('on', oldVal);
+        if (statusEl) statusEl.innerHTML = breathingStatusHtml(oldVal, false, 0, oldVal ? '' : 'Off');
+        clearPending(uid, 'breathing');
+      });
     };
 
     var pollSlider = document.getElementById('ctrl-poll-' + uid);
@@ -483,7 +525,12 @@
     if (motionSensEl) motionSensEl.value = d.motionSlider;
 
     var brBtnSync = document.getElementById('ctrl-br-' + uid);
-    if (brBtnSync) brBtnSync.classList.toggle('on', d.brActive);
+    if (brBtnSync) {
+      var brPend = getPending(uid, 'breathing');
+      if (brPend && brPend.timer) { clearTimeout(brPend.timer); clearPending(uid, 'breathing'); }
+      brBtnSync.classList.remove('pending');
+      brBtnSync.classList.toggle('on', d.brActive);
+    }
 
     var brStatusSync = document.getElementById('ctrl-br-status-' + uid);
     if (brStatusSync) brStatusSync.innerHTML = breathingStatusHtml(d.brActive, d.brCalibrating, d.brBpm, d.brStatusText);
@@ -495,6 +542,9 @@
         alertChip('Sound', d.s.sound_alert, d.s.sound_alert_at) +
         alertChip('Motion', d.s.motion_alert, d.s.motion_alert_at);
     }
+
+    var camInfo = document.getElementById('camera-info-' + uid);
+    if (camInfo) camInfo.innerHTML = cameraInfoHtml(d.cam);
   }
 
   // ── Video player ───────────────────────────────────────
@@ -535,6 +585,22 @@
 
   // ── HTML helpers ───────────────────────────────────────
 
+  function cameraInfoHtml(cam) {
+    if (!cam) cam = {};
+    var fw = cam.firmware_version || '--';
+    var hw = cam.hardware_version || '--';
+    var mount = cam.mounting_mode || '--';
+    return '<div class="info-grid">' +
+      infoRow('Firmware', fw) +
+      infoRow('Hardware', hw) +
+      infoRow('Mount', mount) +
+    '</div>';
+  }
+
+  function infoRow(label, value) {
+    return '<div class="ctrl-row"><span class="ctrl-label">' + label + '</span><span class="ctrl-val">' + esc(value) + '</span></div>';
+  }
+
   function breathingStatusHtml(active, calibrating, bpm, statusText) {
     if (!active) return '<span class="br-detail">Off</span>';
     if (calibrating || bpm === 0) return '<span class="br-detail" style="color:var(--amber)">' + statusText + '</span>';
@@ -571,6 +637,50 @@
     var d = document.createElement('div');
     d.textContent = s || '';
     return d.innerHTML;
+  }
+
+  // ── Log panel ──────────────────────────────────────────
+
+  var logContent = document.getElementById('logContent');
+  var logBody = document.getElementById('logBody');
+  var logPanel = document.getElementById('logPanel');
+  var logBadge = document.getElementById('logBadge');
+  var logHeader = document.getElementById('logHeader');
+  var logLineCount = 0;
+  var LOG_MAX = 500;
+
+  logHeader.onclick = function() {
+    logPanel.classList.toggle('collapsed');
+    if (!logPanel.classList.contains('collapsed')) {
+      logBody.scrollTop = logBody.scrollHeight;
+    }
+  };
+
+  function appendLogLine(line) {
+    logLineCount++;
+    logContent.textContent += line + '\n';
+    // Trim if too many lines
+    if (logLineCount > LOG_MAX) {
+      var text = logContent.textContent;
+      var cut = text.indexOf('\n', text.length - LOG_MAX * 80);
+      if (cut > 0) { logContent.textContent = text.substring(cut + 1); }
+      logLineCount = LOG_MAX;
+    }
+    logBadge.textContent = logLineCount + ' lines';
+    // Auto-scroll if near bottom
+    var atBottom = logBody.scrollHeight - logBody.scrollTop - logBody.clientHeight < 60;
+    if (atBottom) logBody.scrollTop = logBody.scrollHeight;
+  }
+
+  function appendLogLines(lines) {
+    logContent.textContent = '';
+    logLineCount = 0;
+    for (var i = 0; i < lines.length; i++) {
+      logLineCount++;
+      logContent.textContent += lines[i] + '\n';
+    }
+    logBadge.textContent = logLineCount + ' lines';
+    logBody.scrollTop = logBody.scrollHeight;
   }
 
   // ── Boot ───────────────────────────────────────────────

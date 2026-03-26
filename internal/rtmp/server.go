@@ -1,11 +1,13 @@
 package rtmp
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
 	"regexp"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/notedit/rtmp/av"
@@ -128,7 +130,10 @@ func (s *Server) Subscribe(key string) (packets <-chan av.Packet, unsubscribe fu
 
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
-	lis, err := net.Listen("tcp", addr)
+	lc := net.ListenConfig{
+		Control: setReuseAddr,
+	}
+	lis, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("rtmp listen: %w", err)
 	}
@@ -260,4 +265,10 @@ func (s *Server) handleSubscriber(c *rtmp.Conn, nc net.Conn, key string) {
 			return
 		}
 	}
+}
+
+func setReuseAddr(network, address string, c syscall.RawConn) error {
+	return c.Control(func(fd uintptr) {
+		syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+	})
 }

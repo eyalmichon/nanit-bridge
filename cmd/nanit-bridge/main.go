@@ -21,6 +21,9 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	log.SetPrefix("[nanit-bridge] ")
 
+	logBcast := api.NewLogBroadcaster()
+	log.SetOutput(logBcast)
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -58,7 +61,7 @@ func main() {
 
 	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr, cfg.SensorPollSec, cfg.PushCredsFile)
 
-	apiServer := api.NewServer(cfg.HTTPPort, mgr, rtmpServer)
+	apiServer := api.NewServer(cfg.HTTPPort, mgr, rtmpServer, logBcast)
 
 	mgr.OnStateChange(func(babyUID string, state *baby.State) {
 		if mqttPub != nil {

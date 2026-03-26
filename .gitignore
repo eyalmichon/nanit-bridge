@@ -1,6 +1,11 @@
+# Build artifacts
 bin/
+nanit-bridge
 *.pb.go
+
+# Runtime / secrets
 .env
 /data/
-.plans/
-nanit-bridge
+
+# Local development
+.dev/

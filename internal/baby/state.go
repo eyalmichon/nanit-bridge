@@ -29,7 +29,12 @@ type BreathingState struct {
 	Calibrating    bool
 	BreathsPerMin  int
 	BreathingScore float32
-	MotionScore    float32
+}
+
+type CameraInfo struct {
+	FirmwareVersion   string
+	HardwareVersion   string
+	MountingMode      string
 }
 
 type ControlState struct {
@@ -77,6 +82,7 @@ type State struct {
 	Name       string
 	Sensors    SensorState
 	Controls   ControlState
+	Camera     CameraInfo
 	Stream     StreamState
 	WSAlive    bool
 
@@ -142,8 +148,19 @@ func (s *State) UpdateControls(fn func(*ControlState)) {
 	}
 }
 
-func (s *State) Snapshot() (SensorState, ControlState, StreamState, bool) {
+func (s *State) UpdateCameraInfo(fn func(*CameraInfo)) {
+	s.mu.Lock()
+	fn(&s.Camera)
+	subs := append([]func(){}, s.subscribers...)
+	s.mu.Unlock()
+
+	for _, sub := range subs {
+		sub()
+	}
+}
+
+func (s *State) Snapshot() (SensorState, ControlState, CameraInfo, StreamState, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.Sensors, s.Controls, s.Stream, s.WSAlive
+	return s.Sensors, s.Controls, s.Camera, s.Stream, s.WSAlive
 }

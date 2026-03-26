@@ -340,20 +340,43 @@ func (m *Manager) startBaby(b nanit.Baby) {
 		})
 	})
 
+	client.OnStatus(func(status *pb.Status) {
+		state.UpdateCameraInfo(func(ci *CameraInfo) {
+			if status.CurrentVersion != nil {
+				ci.FirmwareVersion = status.GetCurrentVersion()
+			}
+			if status.HardwareVersion != nil {
+				ci.HardwareVersion = status.GetHardwareVersion()
+			}
+			if status.Mode != nil {
+				ci.MountingMode = status.GetMode().String()
+			}
+		})
+	})
+
+	client.OnFirmware(func(fw *pb.Firmware) {
+		state.UpdateCameraInfo(func(ci *CameraInfo) {
+			if fw.Version != nil && ci.FirmwareVersion == "" {
+				ci.FirmwareVersion = fw.GetVersion()
+			}
+		})
+	})
+
 	client.OnStingStatus(func(ss *pb.StingStatus) {
 		state.UpdateControls(func(c *ControlState) {
 			switch ss.GetState() {
-			case pb.StingStatus_STARTING:
+			case pb.StingStatus_INITING, pb.StingStatus_RESUMING:
 				c.Breathing.Active = true
 				c.Breathing.Calibrating = true
 				c.Breathing.BreathsPerMin = 0
-			case pb.StingStatus_MONITORING:
+			case pb.StingStatus_RUNNING:
 				c.Breathing.Active = true
 				c.Breathing.Calibrating = false
 				c.Breathing.BreathsPerMin = int(ss.GetBreathsPerMin())
-				c.Breathing.BreathingScore = ss.GetBreathingScore()
-				c.Breathing.MotionScore = ss.GetMotionScore()
-			case pb.StingStatus_STOPPED:
+			case pb.StingStatus_PAUSED:
+				c.Breathing.Active = true
+				c.Breathing.Calibrating = false
+			default:
 				c.Breathing.Active = false
 				c.Breathing.Calibrating = false
 				c.Breathing.BreathsPerMin = 0

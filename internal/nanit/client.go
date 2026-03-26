@@ -54,6 +54,8 @@ type CameraClient struct {
 	onPlaybackState func(*pb.Playback)
 	onSoundtracks   func([]*pb.Soundtrack)
 	onStingStatus   func(*pb.StingStatus)
+	onStatus        func(*pb.Status)
+	onFirmware      func(*pb.Firmware)
 	onConnect       func()
 	onDisconnect    func()
 
@@ -90,16 +92,17 @@ func (c *CameraClient) GetSensorPollInterval() int {
 	return int(c.sensorPollSec.Load())
 }
 
-func (c *CameraClient) OnSensor(fn func(SensorUpdate))        { c.onSensor = fn }
-func (c *CameraClient) OnStreaming(fn func(StreamingUpdate))   { c.onStreaming = fn }
-func (c *CameraClient) OnSettings(fn func(*pb.Settings))       { c.onSettings = fn }
-func (c *CameraClient) OnControl(fn func(*pb.Control))         { c.onControl = fn }
-func (c *CameraClient) OnPlaybackState(fn func(*pb.Playback))  { c.onPlaybackState = fn }
+func (c *CameraClient) OnSensor(fn func(SensorUpdate))          { c.onSensor = fn }
+func (c *CameraClient) OnStreaming(fn func(StreamingUpdate))    { c.onStreaming = fn }
+func (c *CameraClient) OnSettings(fn func(*pb.Settings))        { c.onSettings = fn }
+func (c *CameraClient) OnControl(fn func(*pb.Control))          { c.onControl = fn }
+func (c *CameraClient) OnPlaybackState(fn func(*pb.Playback))   { c.onPlaybackState = fn }
 func (c *CameraClient) OnSoundtracks(fn func([]*pb.Soundtrack)) { c.onSoundtracks = fn }
 func (c *CameraClient) OnStingStatus(fn func(*pb.StingStatus))  { c.onStingStatus = fn }
+func (c *CameraClient) OnStatus(fn func(*pb.Status))            { c.onStatus = fn }
+func (c *CameraClient) OnFirmware(fn func(*pb.Firmware))        { c.onFirmware = fn }
 func (c *CameraClient) OnConnect(fn func())                     { c.onConnect = fn }
 func (c *CameraClient) OnDisconnect(fn func())                  { c.onDisconnect = fn }
-
 
 func (c *CameraClient) Start() {
 	c.wg.Add(1)
@@ -158,7 +161,7 @@ func (c *CameraClient) connect() error {
 	}
 
 	dialer := websocket.Dialer{
-		TLSClientConfig: &tls.Config{},
+		TLSClientConfig:  &tls.Config{},
 		HandshakeTimeout: 10 * time.Second,
 	}
 
@@ -196,6 +199,8 @@ func (c *CameraClient) connect() error {
 		{"playback state", c.RequestPlayback},
 		{"soundtracks", c.RequestSoundtracks},
 		{"sting status", c.RequestStingStatus},
+		{"camera status", c.RequestStatus},
+		{"firmware", c.RequestFirmware},
 	}
 	for _, r := range initRequests {
 		if err := r.fn(); err != nil {
@@ -403,10 +408,37 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 			c.onStingStatus(resp.GetStingStatus())
 		}
 
-	case pb.RequestType_PUT_STING_START, pb.RequestType_PUT_STING_STOP:
+	case pb.RequestType_GET_STATUS:
+		if c.onStatus != nil && resp.GetStatus() != nil {
+			c.onStatus(resp.GetStatus())
+		}
+
+	case pb.RequestType_GET_FIRMWARE:
+		if c.onFirmware != nil && resp.GetFirmware() != nil {
+			c.onFirmware(resp.GetFirmware())
+		}
+
+	case pb.RequestType_PUT_STING_START:
 		if resp.GetStatusCode() != 200 {
-			log.Printf("[camera:%s] %v: status=%d %s",
-				c.cameraUID, resp.GetRequestType(), resp.GetStatusCode(), resp.GetStatusMessage())
+			log.Printf("[camera:%s] PUT_STING_START: status=%d %s",
+				c.cameraUID, resp.GetStatusCode(), resp.GetStatusMessage())
+			if c.onStingStatus != nil {
+				off := pb.StingStatus_OFF
+				c.onStingStatus(&pb.StingStatus{State: &off})
+			}
+		} else {
+			go c.RequestStingStatus()
+		}
+
+	case pb.RequestType_PUT_STING_STOP:
+		if resp.GetStatusCode() != 200 {
+			log.Printf("[camera:%s] PUT_STING_STOP: status=%d %s",
+				c.cameraUID, resp.GetStatusCode(), resp.GetStatusMessage())
+		} else {
+			if c.onStingStatus != nil {
+				off := pb.StingStatus_OFF
+				c.onStingStatus(&pb.StingStatus{State: &off})
+			}
 		}
 
 	case pb.RequestType_PUT_STREAMING:
@@ -468,9 +500,9 @@ func (c *CameraClient) startStreaming() error {
 		mobile := pb.StreamIdentifier_MOBILE
 		attempts := int32(1)
 		req.Streaming = &pb.Streaming{
-			Id:      &mobile,
-			Status:  &started,
-			RtmpUrl: &c.rtmpURL,
+			Id:       &mobile,
+			Status:   &started,
+			RtmpUrl:  &c.rtmpURL,
 			Attempts: &attempts,
 		}
 	})
@@ -562,9 +594,9 @@ func (c *CameraClient) RequestControl() error {
 	return c.sendRequest(pb.RequestType_GET_CONTROL, func(req *pb.Request) {
 		t := true
 		req.GetControl_ = &pb.GetControl{
-			NightLight:            &t,
-			NightLightTimeout:     &t,
-			SensorDataTransferEn:  &t,
+			NightLight:           &t,
+			NightLightTimeout:    &t,
+			SensorDataTransferEn: &t,
 		}
 	})
 }
@@ -731,11 +763,27 @@ func (c *CameraClient) RequestStingStatus() error {
 }
 
 func (c *CameraClient) StartBreathingMonitoring() error {
-	return c.sendRequest(pb.RequestType_PUT_STING_START, nil)
+	return c.sendRequest(pb.RequestType_PUT_STING_START, func(req *pb.Request) {
+		showOverlay := true
+		req.StingStart = &pb.StingStart{
+			DisplayData: &showOverlay,
+		}
+	})
 }
 
 func (c *CameraClient) StopBreathingMonitoring() error {
 	return c.sendRequest(pb.RequestType_PUT_STING_STOP, nil)
+}
+
+func (c *CameraClient) RequestStatus() error {
+	return c.sendRequest(pb.RequestType_GET_STATUS, func(req *pb.Request) {
+		all := true
+		req.GetStatus_ = &pb.GetStatus{All: &all}
+	})
+}
+
+func (c *CameraClient) RequestFirmware() error {
+	return c.sendRequest(pb.RequestType_GET_FIRMWARE, nil)
 }
 
 // backoff computes delay with exponential backoff + jitter, capped at maxBackoff.
