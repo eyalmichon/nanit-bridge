@@ -559,10 +559,13 @@
     }, {
       enableWorker: true,
       liveBufferLatencyChasing: true,
-      liveBufferLatencyMaxLatency: 1.5,
-      liveBufferLatencyMinRemain: 0.3,
-      lazyLoadMaxDuration: 1,
-      deferLoadAfterSourceOpen: false
+      liveBufferLatencyMaxLatency: 3.0,
+      liveBufferLatencyMinRemain: 0.5,
+      lazyLoadMaxDuration: 5,
+      deferLoadAfterSourceOpen: false,
+      autoCleanupSourceBuffer: true,
+      autoCleanupMaxBackwardDuration: 10,
+      autoCleanupMinBackwardDuration: 5
     });
     player.attachMediaElement(videoEl);
     player.load();
@@ -571,7 +574,16 @@
       setTimeout(function() {
         destroyPlayer(uid);
         if (babies[uid] && babies[uid].stream === 'active') startPlayer(uid);
-      }, 2000);
+      }, 3000);
+    });
+    var stallCount = 0;
+    videoEl.addEventListener('stalled', function onStall() {
+      stallCount++;
+      if (stallCount > 3) {
+        videoEl.removeEventListener('stalled', onStall);
+        destroyPlayer(uid);
+        if (babies[uid] && babies[uid].stream === 'active') startPlayer(uid);
+      }
     });
     players[uid] = player;
   }

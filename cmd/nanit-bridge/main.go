@@ -59,7 +59,7 @@ func main() {
 		log.Printf("MQTT connected to %s", cfg.MQTTBrokerURL)
 	}
 
-	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr, cfg.SensorPollSec, cfg.PushCredsFile)
+	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr, cfg.SensorPollSec, cfg.PushCredsFile, rtmpServer)
 
 	apiServer := api.NewServer(cfg.HTTPPort, mgr, rtmpServer, logBcast)
 

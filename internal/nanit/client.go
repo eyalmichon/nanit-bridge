@@ -60,9 +60,10 @@ type CameraClient struct {
 	onDisconnect    func()
 
 	done           chan struct{}
-	wg             sync.WaitGroup
-	streamRetryMu  sync.Mutex
-	streamRetrying bool
+	wg              sync.WaitGroup
+	streamRetryMu   sync.Mutex
+	streamRetrying  bool
+	lastWinLocation *pb.Point
 }
 
 func NewCameraClient(cameraUID, babyUID string, tokenMgr *TokenManager, rtmpURL string, sensorPollSec int) *CameraClient {
@@ -358,8 +359,17 @@ func (c *CameraClient) handleRequest(req *pb.Request) {
 		}
 
 	case pb.RequestType_PUT_STING_STATUS:
-		if c.onStingStatus != nil && req.GetStingStatus() != nil {
-			c.onStingStatus(req.GetStingStatus())
+		if req.GetStingStatus() != nil {
+			ss := req.GetStingStatus()
+			log.Printf("[camera:%s] STING_STATUS push: state=%v breathing=%v bpm=%d win=%v pattern=%v",
+				c.cameraUID, ss.GetState(), ss.GetBreathing(), ss.GetBreathsPerMin(),
+				ss.GetWinLocation(), ss.GetPatternLocation())
+			if ss.GetWinLocation() != nil {
+				c.lastWinLocation = ss.GetWinLocation()
+			}
+			if c.onStingStatus != nil {
+				c.onStingStatus(ss)
+			}
 		}
 
 	default:
@@ -404,8 +414,16 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 		}
 
 	case pb.RequestType_GET_STING_STATUS:
-		if c.onStingStatus != nil && resp.GetStingStatus() != nil {
-			c.onStingStatus(resp.GetStingStatus())
+		ss := resp.GetStingStatus()
+		if ss != nil {
+			log.Printf("[camera:%s] GET_STING_STATUS response: state=%v breathing=%v bpm=%d",
+				c.cameraUID, ss.GetState(), ss.GetBreathing(), ss.GetBreathsPerMin())
+		} else {
+			log.Printf("[camera:%s] GET_STING_STATUS response: status=%d %s (no sting_status field)",
+				c.cameraUID, resp.GetStatusCode(), resp.GetStatusMessage())
+		}
+		if c.onStingStatus != nil && ss != nil {
+			c.onStingStatus(ss)
 		}
 
 	case pb.RequestType_GET_STATUS:
@@ -419,9 +437,9 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 		}
 
 	case pb.RequestType_PUT_STING_START:
+		log.Printf("[camera:%s] PUT_STING_START response: status=%d %s",
+			c.cameraUID, resp.GetStatusCode(), resp.GetStatusMessage())
 		if resp.GetStatusCode() != 200 {
-			log.Printf("[camera:%s] PUT_STING_START: status=%d %s",
-				c.cameraUID, resp.GetStatusCode(), resp.GetStatusMessage())
 			if c.onStingStatus != nil {
 				off := pb.StingStatus_OFF
 				c.onStingStatus(&pb.StingStatus{State: &off})
@@ -762,12 +780,24 @@ func (c *CameraClient) RequestStingStatus() error {
 	return c.sendRequest(pb.RequestType_GET_STING_STATUS, nil)
 }
 
-func (c *CameraClient) StartBreathingMonitoring() error {
+func (c *CameraClient) StartBreathingMonitoring(point *BmmPatternPoint) error {
 	return c.sendRequest(pb.RequestType_PUT_STING_START, func(req *pb.Request) {
 		showOverlay := true
-		req.StingStart = &pb.StingStart{
+		ss := &pb.StingStart{
 			DisplayData: &showOverlay,
 		}
+		if point != nil {
+			x := int32(point.X)
+			y := int32(point.Y)
+			ss.WinLocation = &pb.Point{X: &x, Y: &y}
+			log.Printf("[camera:%s] sting start with BMM point: x=%d y=%d", c.cameraUID, point.X, point.Y)
+		} else if c.lastWinLocation != nil {
+			log.Printf("[camera:%s] sting start with cached win_location: %v", c.cameraUID, c.lastWinLocation)
+			ss.WinLocation = c.lastWinLocation
+		} else {
+			log.Printf("[camera:%s] sting start with no coordinates", c.cameraUID)
+		}
+		req.StingStart = ss
 	})
 }
 

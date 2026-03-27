@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -450,6 +453,124 @@ func (tm *TokenManager) buildRequest(method, url string, body interface{}) (*htt
 	req.Header.Set("nanit-api-version", apiVersion)
 	req.Header.Set("User-Agent", userAgent)
 	return req, nil
+}
+
+type BmmPatternPoint struct {
+	X int
+	Y int
+}
+
+type bmmPatternPoints struct {
+	X1 string `json:"x1"`
+	X2 string `json:"x2"`
+	Y1 string `json:"y1"`
+	Y2 string `json:"y2"`
+}
+
+type bmmPatternData struct {
+	PatternPoints *bmmPatternPoints `json:"pattern_points"`
+	Score         string            `json:"score"`
+}
+
+type bmmSessionData struct {
+	PatternObjects []bmmPatternData `json:"pattern_objects"`
+}
+
+type bmmSession struct {
+	BabyUID      string         `json:"baby_uid"`
+	CameraStatus string         `json:"camera_status"`
+	CameraUID    string         `json:"camera_uid"`
+	Detected     bool           `json:"detected"`
+	TriggerType  string         `json:"trigger_type"`
+	TriggerID    string         `json:"trigger_id"`
+	Data         bmmSessionData `json:"data"`
+}
+
+type bmmPatternLocationResponse struct {
+	StingSession bmmSession `json:"sting_session"`
+}
+
+// GetBmmPatternLocation uploads a camera frame to the Nanit cloud API for
+// baby position detection. Returns the detected pattern centre point or an
+// error if detection fails.
+func (tm *TokenManager) GetBmmPatternLocation(babyUID string, framePNG []byte, irOn bool) (*BmmPatternPoint, error) {
+	token, err := tm.GetAccessToken()
+	if err != nil {
+		return nil, fmt.Errorf("get token: %w", err)
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", `form-data; name="image"; filename="image"`)
+	h.Set("Content-Type", "image/png")
+	part, err := w.CreatePart(h)
+	if err != nil {
+		return nil, fmt.Errorf("create image part: %w", err)
+	}
+	if _, err := part.Write(framePNG); err != nil {
+		return nil, fmt.Errorf("write image: %w", err)
+	}
+
+	cameraStatus := "rgb"
+	if irOn {
+		cameraStatus = "ir"
+	}
+	if err := w.WriteField("camera_status", cameraStatus); err != nil {
+		return nil, fmt.Errorf("write camera_status: %w", err)
+	}
+	w.Close()
+
+	url := fmt.Sprintf("%s/focus/babies/%s/bmm/sessions", apiBase, babyUID)
+	req, err := http.NewRequest("POST", url, &buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("nanit-api-version", apiVersion)
+
+	resp, err := tm.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("bmm request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("bmm status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result bmmPatternLocationResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse bmm response: %w", err)
+	}
+
+	if !result.StingSession.Detected {
+		return nil, fmt.Errorf("baby not detected in frame")
+	}
+
+	if len(result.StingSession.Data.PatternObjects) == 0 {
+		return nil, fmt.Errorf("no pattern objects returned")
+	}
+
+	pp := result.StingSession.Data.PatternObjects[0].PatternPoints
+	if pp == nil {
+		return nil, fmt.Errorf("pattern points nil")
+	}
+
+	x1, err := strconv.ParseFloat(pp.X1, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse x1 %q: %w", pp.X1, err)
+	}
+	y1, err := strconv.ParseFloat(pp.Y1, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse y1 %q: %w", pp.Y1, err)
+	}
+
+	return &BmmPatternPoint{X: int(x1), Y: int(y1)}, nil
 }
 
 func dirOf(path string) string {

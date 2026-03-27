@@ -1,14 +1,25 @@
 package baby
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	"github.com/Eyevinn/hi264/pkg/decoder"
+	"github.com/Eyevinn/hi264/pkg/yuv"
+	"github.com/notedit/rtmp/av"
+	"github.com/notedit/rtmp/codec/h264"
+
 	"nanit-bridge/internal/nanit"
 	pb "nanit-bridge/internal/nanit/nanitpb"
 )
+
+// StreamSubscriber provides read access to live RTMP streams.
+type StreamSubscriber interface {
+	Subscribe(key string) (packets <-chan av.Packet, unsubscribe func(), ok bool)
+}
 
 type Manager struct {
 	mu            sync.Mutex
@@ -18,6 +29,7 @@ type Manager struct {
 	sensorPollSec int
 	stopCh        chan struct{}
 	pushReceiver  *nanit.PushReceiver
+	rtmpSub       StreamSubscriber
 
 	onStateChange func(babyUID string, state *State)
 }
@@ -27,13 +39,14 @@ type ManagedBaby struct {
 	client *nanit.CameraClient
 }
 
-func NewManager(tokenMgr *nanit.TokenManager, rtmpAddr string, sensorPollSec int, pushCredsFile string) *Manager {
+func NewManager(tokenMgr *nanit.TokenManager, rtmpAddr string, sensorPollSec int, pushCredsFile string, rtmpSub StreamSubscriber) *Manager {
 	m := &Manager{
 		babies:        make(map[string]*ManagedBaby),
 		tokenMgr:      tokenMgr,
 		rtmpAddr:      rtmpAddr,
 		sensorPollSec: sensorPollSec,
 		stopCh:        make(chan struct{}),
+		rtmpSub:       rtmpSub,
 	}
 
 	if pushCredsFile != "" {
@@ -142,7 +155,104 @@ func (m *Manager) StartBreathingMonitoring(babyUID string) error {
 	if !ok {
 		return fmt.Errorf("baby %q not found", babyUID)
 	}
-	return mb.client.StartBreathingMonitoring()
+
+	point, err := m.detectBabyPosition(babyUID)
+	if err != nil {
+		log.Printf("[bmm:%s] pattern detection failed: %v — trying with cached location", babyUID, err)
+		return mb.client.StartBreathingMonitoring(nil)
+	}
+	log.Printf("[bmm:%s] detected baby at x=%d y=%d", babyUID, point.X, point.Y)
+	return mb.client.StartBreathingMonitoring(point)
+}
+
+func (m *Manager) detectBabyPosition(babyUID string) (*nanit.BmmPatternPoint, error) {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("baby %q not found", babyUID)
+	}
+
+	cameraUID := mb.State.CameraUID
+
+	framePNG, err := captureFrameFromStream(m.rtmpSub, cameraUID)
+	if err != nil {
+		return nil, fmt.Errorf("capture frame: %w", err)
+	}
+	log.Printf("[bmm:%s] captured frame: %d bytes", babyUID, len(framePNG))
+
+	irOn := mb.State.Sensors.IsNight
+
+	return m.tokenMgr.GetBmmPatternLocation(babyUID, framePNG, irOn)
+}
+
+// captureFrameFromStream subscribes to the live RTMP stream, waits for a
+// keyframe, decodes the H.264 IDR using a pure Go decoder (hi264), and
+// returns the frame as PNG bytes. No external binaries required.
+func captureFrameFromStream(sub StreamSubscriber, cameraUID string) ([]byte, error) {
+	if sub == nil {
+		return nil, fmt.Errorf("no RTMP stream subscriber available")
+	}
+
+	packets, unsub, ok := sub.Subscribe(cameraUID)
+	if !ok {
+		return nil, fmt.Errorf("stream %q not available", cameraUID)
+	}
+	defer unsub()
+
+	var spsNALUs, ppsNALUs [][]byte
+	timeout := time.After(10 * time.Second)
+
+	for {
+		select {
+		case <-timeout:
+			return nil, fmt.Errorf("timed out waiting for keyframe on stream %q", cameraUID)
+		case pkt, open := <-packets:
+			if !open {
+				return nil, fmt.Errorf("stream %q closed before keyframe received", cameraUID)
+			}
+
+			switch pkt.Type {
+			case av.H264DecoderConfig:
+				codec, err := h264.FromDecoderConfig(pkt.Data)
+				if err != nil {
+					return nil, fmt.Errorf("parse H264 decoder config: %w", err)
+				}
+				spsNALUs = h264.Map2arr(codec.SPS)
+				ppsNALUs = h264.Map2arr(codec.PPS)
+
+			case av.H264:
+				if !pkt.IsKeyFrame || len(spsNALUs) == 0 {
+					continue
+				}
+				return decodeKeyframe(spsNALUs, ppsNALUs, pkt.Data)
+			}
+		}
+	}
+}
+
+// decodeKeyframe takes SPS/PPS NALUs and an AVC-format video packet, decodes
+// the IDR frame, and returns PNG bytes.
+func decodeKeyframe(spsNALUs, ppsNALUs [][]byte, videoData []byte) ([]byte, error) {
+	var nalus [][]byte
+	nalus = append(nalus, spsNALUs...)
+	nalus = append(nalus, ppsNALUs...)
+
+	videoNALUs, _ := h264.SplitNALUs(videoData)
+	nalus = append(nalus, videoNALUs...)
+
+	dec := decoder.New()
+	frame, err := dec.DecodeNALUs(nalus)
+	if err != nil {
+		return nil, fmt.Errorf("decode H.264 IDR: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := yuv.WritePNG(&buf, frame); err != nil {
+		return nil, fmt.Errorf("encode PNG: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
 func (m *Manager) StopBreathingMonitoring(babyUID string) error {

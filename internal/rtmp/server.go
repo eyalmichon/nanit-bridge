@@ -26,7 +26,8 @@ type broadcaster struct {
 }
 
 type subscriber struct {
-	pktC chan av.Packet
+	pktC          chan av.Packet
+	needsKeyframe bool // when true, non-keyframe H264 packets are skipped
 }
 
 func newBroadcaster() *broadcaster {
@@ -37,7 +38,8 @@ func newBroadcaster() *broadcaster {
 
 func (b *broadcaster) addSubscriber(id string) *subscriber {
 	sub := &subscriber{
-		pktC: make(chan av.Packet, 64),
+		pktC:          make(chan av.Packet, 256),
+		needsKeyframe: true, // wait for keyframe before sending video
 	}
 
 	b.mu.Lock()
@@ -76,12 +78,30 @@ func (b *broadcaster) closeSubscribers() {
 }
 
 func (b *broadcaster) broadcast(pkt av.Packet) {
+	isVideo := pkt.Type == av.H264
+	isKeyframe := isVideo && pkt.IsKeyFrame
+
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	for _, sub := range b.subscribers {
+		if sub.needsKeyframe {
+			if isVideo && !isKeyframe {
+				continue // skip P/B-frames until a keyframe arrives
+			}
+			if isKeyframe {
+				sub.needsKeyframe = false
+			}
+		}
+
 		select {
 		case sub.pktC <- pkt:
 		default:
+			// channel full — drain it and wait for the next keyframe to resync
+			sub.needsKeyframe = true
+			n := len(sub.pktC)
+			for i := 0; i < n; i++ {
+				<-sub.pktC
+			}
 		}
 	}
 }
