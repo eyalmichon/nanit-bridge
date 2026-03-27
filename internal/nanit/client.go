@@ -4,9 +4,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
-	"math"
-	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,10 +17,9 @@ import (
 )
 
 const (
-	keepaliveInterval = 25 * time.Second
-	maxBackoff        = 5 * time.Minute
-	baseBackoff       = 2 * time.Second
-	staleTimeout      = 5 * time.Minute
+	keepaliveInterval  = 25 * time.Second
+	reconnectInterval  = 5 * time.Second
+	staleTimeout       = 90 * time.Second
 )
 
 type SensorUpdate struct {
@@ -111,19 +109,25 @@ func (c *CameraClient) Start() {
 }
 
 func (c *CameraClient) Stop() {
-	close(c.done)
 	c.connMu.Lock()
 	if c.conn != nil {
 		c.conn.Close()
 	}
 	c.connMu.Unlock()
-	c.wg.Wait()
+	close(c.done)
+
+	ch := make(chan struct{})
+	go func() { c.wg.Wait(); close(ch) }()
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		log.Printf("[camera:%s] stop: timed out waiting for goroutines", c.cameraUID)
+	}
 }
 
 func (c *CameraClient) connectLoop() {
 	defer c.wg.Done()
 
-	attempt := 0
 	for {
 		select {
 		case <-c.done:
@@ -131,21 +135,14 @@ func (c *CameraClient) connectLoop() {
 		default:
 		}
 
-		connStart := time.Now()
-		err := c.connect()
-		if err != nil {
+		if err := c.connect(); err != nil {
 			log.Printf("[camera:%s] connection error: %v", c.cameraUID, err)
-		}
-
-		if time.Since(connStart) > 2*time.Minute {
-			attempt = 0
 		}
 
 		select {
 		case <-c.done:
 			return
-		case <-time.After(backoff(attempt)):
-			attempt++
+		case <-time.After(reconnectInterval):
 		}
 	}
 }
@@ -474,6 +471,12 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 		} else {
 			log.Printf("[camera:%s] PUT_STREAMING failed: status=%d %s",
 				c.cameraUID, resp.GetStatusCode(), resp.GetStatusMessage())
+			if strings.Contains(resp.GetStatusMessage(), "sleeping") {
+				log.Printf("[camera:%s] camera is in sleep mode, stopping stream retry", c.cameraUID)
+				c.streamRetryMu.Lock()
+				c.streamRetrying = false
+				c.streamRetryMu.Unlock()
+			}
 		}
 
 	default:
@@ -531,6 +534,12 @@ func (c *CameraClient) stopStreaming() {
 	c.streamRetrying = false
 	c.streamRetryMu.Unlock()
 
+	select {
+	case <-c.done:
+		return // shutting down, skip the network write
+	default:
+	}
+
 	empty := ""
 	_ = c.sendRequest(pb.RequestType_PUT_STREAMING, func(req *pb.Request) {
 		stopped := pb.Streaming_STOPPED
@@ -541,6 +550,17 @@ func (c *CameraClient) stopStreaming() {
 			RtmpUrl: &empty,
 		}
 	})
+}
+
+// RestartStreaming re-requests the video stream from the camera.
+// It sends an immediate request, then enters the retry loop which keeps
+// retrying until the camera confirms the stream is active.
+func (c *CameraClient) RestartStreaming() {
+	log.Printf("[camera:%s] re-requesting stream", c.cameraUID)
+	if err := c.startStreaming(); err != nil {
+		log.Printf("[camera:%s] stream re-request failed: %v", c.cameraUID, err)
+	}
+	c.scheduleStreamRetry()
 }
 
 func (c *CameraClient) scheduleStreamRetry() {
@@ -574,10 +594,7 @@ func (c *CameraClient) streamRetryLoop() {
 
 		if err := c.startStreaming(); err != nil {
 			log.Printf("[camera:%s] stream retry send failed: %v", c.cameraUID, err)
-			c.streamRetryMu.Lock()
-			c.streamRetrying = false
-			c.streamRetryMu.Unlock()
-			return
+			continue
 		}
 
 		// Wait for the async response.
@@ -712,6 +729,24 @@ func (c *CameraClient) SetNightLightBrightness(level int) error {
 	return err
 }
 
+func (c *CameraClient) SetSleepMode(on bool) error {
+	settings := &pb.Settings{SleepMode: &on}
+	err := c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
+		req.Settings = settings
+	})
+	if err == nil && c.onSettings != nil {
+		c.onSettings(settings)
+	}
+	if err == nil && !on {
+		go func() {
+			time.Sleep(2 * time.Second)
+			log.Printf("[camera:%s] sleep mode off — restarting stream", c.cameraUID)
+			c.startStreaming()
+		}()
+	}
+	return err
+}
+
 func (c *CameraClient) SetSoundSensitivity(value int32) error {
 	sType := pb.SensorType_SOUND
 	useLow := true
@@ -816,12 +851,3 @@ func (c *CameraClient) RequestFirmware() error {
 	return c.sendRequest(pb.RequestType_GET_FIRMWARE, nil)
 }
 
-// backoff computes delay with exponential backoff + jitter, capped at maxBackoff.
-func backoff(attempt int) time.Duration {
-	if attempt == 0 {
-		return 0
-	}
-	exp := math.Min(float64(maxBackoff), float64(baseBackoff)*math.Pow(2, float64(attempt-1)))
-	jitter := rand.Float64() * 0.3 * exp
-	return time.Duration(exp + jitter)
-}

@@ -227,6 +227,7 @@
     var nlTimeout = c.night_light_timeout || 0;
     var pbOn = getControlValue(uid, 'playback', c.playback);
     var vol = getControlValue(uid, 'volume', c.volume || 0);
+    var sleepMode = c.sleep_mode || false;
     var br = c.breathing || {};
     var brActive = br.active || false;
     var brCalibrating = br.calibrating || false;
@@ -295,6 +296,7 @@
         pbOn: pbOn, vol: vol, tracks: tracks, curTrack: curTrack,
         brActive: brActive, brCalibrating: brCalibrating, brBpm: brBpm,
         brStatusText: brStatusText, pollSec: pollSec,
+        sleepMode: sleepMode,
         s: s, soundSlider: soundSlider, motionSlider: motionSlider,
         cam: cam
       });
@@ -303,7 +305,7 @@
         nlOn: nlOn, nlBright: nlBright, nlTimeout: nlTimeout,
         pbOn: pbOn, curTrack: curTrack,
         brActive: brActive, brCalibrating: brCalibrating, brBpm: brBpm,
-        brStatusText: brStatusText,
+        brStatusText: brStatusText, sleepMode: sleepMode,
         soundSlider: soundSlider, motionSlider: motionSlider,
         s: s, cam: cam
       });
@@ -399,7 +401,12 @@
         '</div>' +
 
         '<div class="sec">' +
-          '<div class="sec-head"><span class="sec-title">Settings</span></div>' +
+          '<div class="sec-head"><span class="sec-title">Camera</span>' +
+          '<button class="toggle sleep-toggle ' + (d.sleepMode ? 'on' : '') + '" id="ctrl-sleep-' + uid + '" title="Camera off / privacy mode"></button></div>' +
+          '<div class="ctrl-row">' +
+            '<span class="ctrl-label">Privacy Mode</span>' +
+            '<span class="ctrl-hint" id="ctrl-sleep-hint-' + uid + '">' + (d.sleepMode ? 'Camera is off' : 'Camera is on') + '</span>' +
+          '</div>' +
           '<div class="ctrl-row">' +
             '<span class="ctrl-label">Sensor Poll</span>' +
             '<div class="slider-row">' +
@@ -491,6 +498,15 @@
       });
     };
 
+    var sleepBtn = document.getElementById('ctrl-sleep-' + uid);
+    if (sleepBtn) sleepBtn.onclick = function() {
+      var newVal = !this.classList.contains('on');
+      this.classList.toggle('on', newVal);
+      var hint = document.getElementById('ctrl-sleep-hint-' + uid);
+      if (hint) hint.textContent = newVal ? 'Camera is off' : 'Camera is on';
+      sendControl(uid, 'sleep_mode', newVal);
+    };
+
     var pollSlider = document.getElementById('ctrl-poll-' + uid);
     var pollVal = document.getElementById('ctrl-poll-val-' + uid);
     if (pollSlider) {
@@ -534,6 +550,11 @@
 
     var brStatusSync = document.getElementById('ctrl-br-status-' + uid);
     if (brStatusSync) brStatusSync.innerHTML = breathingStatusHtml(d.brActive, d.brCalibrating, d.brBpm, d.brStatusText);
+
+    var sleepSync = document.getElementById('ctrl-sleep-' + uid);
+    if (sleepSync) sleepSync.classList.toggle('on', d.sleepMode);
+    var sleepHintSync = document.getElementById('ctrl-sleep-hint-' + uid);
+    if (sleepHintSync) sleepHintSync.textContent = d.sleepMode ? 'Camera is off' : 'Camera is on';
 
     var alertGrid = document.getElementById('alert-grid-' + uid);
     if (alertGrid) {

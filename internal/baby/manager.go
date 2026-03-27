@@ -265,6 +265,27 @@ func (m *Manager) StopBreathingMonitoring(babyUID string) error {
 	return mb.client.StopBreathingMonitoring()
 }
 
+func (m *Manager) RestartStream(babyUID string) {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return
+	}
+	mb.State.SetStreamState(StreamStopped)
+	mb.client.RestartStreaming()
+}
+
+func (m *Manager) SetSleepMode(babyUID string, on bool) error {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("baby %q not found", babyUID)
+	}
+	return mb.client.SetSleepMode(on)
+}
+
 func (m *Manager) SetPlayback(babyUID string, on bool) error {
 	m.mu.Lock()
 	mb, ok := m.babies[babyUID]
@@ -435,6 +456,9 @@ func (m *Manager) startBaby(b nanit.Baby) {
 			if settings.NightLightBrightness != nil {
 				c.NightLightBrightness = int(settings.GetNightLightBrightness())
 			}
+			if settings.SleepMode != nil {
+				c.SleepMode = settings.GetSleepMode()
+			}
 			for _, s := range settings.GetSensors() {
 				switch s.GetSensorType() {
 				case pb.SensorType_SOUND:
@@ -499,6 +523,7 @@ func (m *Manager) startBaby(b nanit.Baby) {
 	})
 	client.OnDisconnect(func() {
 		state.SetWSAlive(false)
+		state.SetStreamState(StreamStopped)
 	})
 
 	if m.onStateChange != nil {

@@ -113,9 +113,10 @@ func (b *broadcaster) broadcast(pkt av.Packet) {
 // listen port can publish or subscribe to streams. Restrict access via firewall
 // rules, Docker network isolation, or a reverse proxy.
 type Server struct {
-	port         int
-	broadcasters map[string]*broadcaster
-	mu           sync.RWMutex
+	port                  int
+	broadcasters          map[string]*broadcaster
+	mu                    sync.RWMutex
+	onPublisherDisconnect func(key string)
 }
 
 func NewServer(port int) *Server {
@@ -123,6 +124,11 @@ func NewServer(port int) *Server {
 		port:         port,
 		broadcasters: make(map[string]*broadcaster),
 	}
+}
+
+// OnPublisherDisconnect registers a callback invoked when a publisher drops.
+func (s *Server) OnPublisherDisconnect(fn func(key string)) {
+	s.onPublisherDisconnect = fn
 }
 
 // HasStream returns true if a publisher is currently broadcasting for the given key.
@@ -222,6 +228,9 @@ func (s *Server) handlePublisher(c *rtmp.Conn, nc net.Conn, key string) {
 		s.mu.Unlock()
 		b.closeSubscribers()
 		log.Printf("[rtmp] publisher disconnected: stream=%s", key)
+		if s.onPublisherDisconnect != nil {
+			go s.onPublisherDisconnect(key)
+		}
 	}()
 
 	for {

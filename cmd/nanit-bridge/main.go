@@ -61,6 +61,10 @@ func main() {
 
 	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr, cfg.SensorPollSec, cfg.PushCredsFile, rtmpServer)
 
+	rtmpServer.OnPublisherDisconnect(func(streamKey string) {
+		mgr.RestartStream(streamKey)
+	})
+
 	apiServer := api.NewServer(cfg.HTTPPort, mgr, rtmpServer, logBcast)
 
 	mgr.OnStateChange(func(babyUID string, state *baby.State) {
