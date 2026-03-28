@@ -355,6 +355,30 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, uid strin
 		}
 		err = s.manager.SetSleepMode(uid, on)
 
+	case "night_vision":
+		on, ok := body.Value.(bool)
+		if !ok {
+			http.Error(w, "value must be boolean", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetNightVision(uid, on)
+
+	case "status_light":
+		on, ok := body.Value.(bool)
+		if !ok {
+			http.Error(w, "value must be boolean", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetStatusLight(uid, on)
+
+	case "mic_mute":
+		on, ok := body.Value.(bool)
+		if !ok {
+			http.Error(w, "value must be boolean", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetMicMute(uid, on)
+
 	default:
 		http.Error(w, "unknown action: "+body.Action, http.StatusBadRequest)
 		return
@@ -558,6 +582,9 @@ func (s *Server) buildBabyJSON(uid string, state *baby.State) map[string]interfa
 			"sound_sensitivity":   controls.SoundSensitivity,
 			"motion_sensitivity":  controls.MotionSensitivity,
 			"sleep_mode":          controls.SleepMode,
+			"night_vision":        controls.NightVision,
+			"status_light":        controls.StatusLight,
+			"mic_mute":            controls.MicMute,
 			"breathing": map[string]interface{}{
 				"active":          controls.Breathing.Active,
 				"calibrating":     controls.Breathing.Calibrating,

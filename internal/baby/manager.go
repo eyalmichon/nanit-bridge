@@ -286,6 +286,36 @@ func (m *Manager) SetSleepMode(babyUID string, on bool) error {
 	return mb.client.SetSleepMode(on)
 }
 
+func (m *Manager) SetNightVision(babyUID string, on bool) error {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("baby %q not found", babyUID)
+	}
+	return mb.client.SetNightVision(on)
+}
+
+func (m *Manager) SetStatusLight(babyUID string, on bool) error {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("baby %q not found", babyUID)
+	}
+	return mb.client.SetStatusLight(on)
+}
+
+func (m *Manager) SetMicMute(babyUID string, on bool) error {
+	m.mu.Lock()
+	mb, ok := m.babies[babyUID]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("baby %q not found", babyUID)
+	}
+	return mb.client.SetMicMute(on)
+}
+
 func (m *Manager) SetPlayback(babyUID string, on bool) error {
 	m.mu.Lock()
 	mb, ok := m.babies[babyUID]
@@ -458,6 +488,15 @@ func (m *Manager) startBaby(b nanit.Baby) {
 			}
 			if settings.SleepMode != nil {
 				c.SleepMode = settings.GetSleepMode()
+			}
+			if settings.NightVision != nil {
+				c.NightVision = settings.GetNightVision()
+			}
+			if settings.StatusLightOn != nil {
+				c.StatusLight = settings.GetStatusLightOn()
+			}
+			if settings.MicMuteOn != nil {
+				c.MicMute = settings.GetMicMuteOn()
 			}
 			for _, s := range settings.GetSensors() {
 				switch s.GetSensorType() {

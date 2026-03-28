@@ -47,6 +47,7 @@ type PushReceiver struct {
 	onMessage   func(PushNotification)
 	stopCh      chan struct{}
 	running     bool
+	staleCount  int
 }
 
 func NewPushReceiver(tokenMgr *TokenManager, credsFile string) *PushReceiver {
@@ -266,7 +267,6 @@ func (p *PushReceiver) handleRawMessage(message *fcm.DataMessageStanza) {
 		return
 	}
 
-	log.Printf("[push] received raw notification: %s", notifData)
 	p.parseAndDispatch([]byte(notifData))
 }
 
@@ -289,10 +289,23 @@ func (p *PushReceiver) parseAndDispatch(data []byte) {
 		}
 	}
 
-	if notif.Type != "" && p.onMessage != nil {
-		log.Printf("[push] dispatching %s notification for baby %s", notif.Type, notif.BabyUID)
-		p.onMessage(notif)
+	if notif.Type == "" || p.onMessage == nil {
+		return
 	}
+
+	age := time.Since(time.Unix(int64(notif.Time), 0))
+	if age > 60*time.Second {
+		p.staleCount++
+		return
+	}
+
+	if p.staleCount > 0 {
+		log.Printf("[push] dropped %d stale buffered notifications", p.staleCount)
+		p.staleCount = 0
+	}
+
+	log.Printf("[push] %s for %s", notif.Type, notif.BabyUID)
+	p.onMessage(notif)
 }
 
 func (p *PushReceiver) loadCredentials() (*PushCredentials, error) {

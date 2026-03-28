@@ -1,6 +1,6 @@
 # Build artifacts
 bin/
-nanit-bridge
+/nanit-bridge
 *.pb.go
 
 # Runtime / secrets

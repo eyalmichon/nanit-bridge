@@ -49,6 +49,9 @@ type ControlState struct {
 	MotionSensitivity    int
 	Breathing            BreathingState
 	SleepMode            bool
+	NightVision          bool
+	StatusLight          bool
+	MicMute              bool
 }
 
 type StreamState int

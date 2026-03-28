@@ -747,6 +747,39 @@ func (c *CameraClient) SetSleepMode(on bool) error {
 	return err
 }
 
+func (c *CameraClient) SetNightVision(on bool) error {
+	settings := &pb.Settings{NightVision: &on}
+	err := c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
+		req.Settings = settings
+	})
+	if err == nil && c.onSettings != nil {
+		c.onSettings(settings)
+	}
+	return err
+}
+
+func (c *CameraClient) SetStatusLight(on bool) error {
+	settings := &pb.Settings{StatusLightOn: &on}
+	err := c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
+		req.Settings = settings
+	})
+	if err == nil && c.onSettings != nil {
+		c.onSettings(settings)
+	}
+	return err
+}
+
+func (c *CameraClient) SetMicMute(on bool) error {
+	settings := &pb.Settings{MicMuteOn: &on}
+	err := c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
+		req.Settings = settings
+	})
+	if err == nil && c.onSettings != nil {
+		c.onSettings(settings)
+	}
+	return err
+}
+
 func (c *CameraClient) SetSoundSensitivity(value int32) error {
 	sType := pb.SensorType_SOUND
 	useLow := true

@@ -228,6 +228,9 @@
     var pbOn = getControlValue(uid, 'playback', c.playback);
     var vol = getControlValue(uid, 'volume', c.volume || 0);
     var sleepMode = c.sleep_mode || false;
+    var nightVision = c.night_vision || false;
+    var statusLight = c.status_light || false;
+    var micMute = c.mic_mute || false;
     var br = c.breathing || {};
     var brActive = br.active || false;
     var brCalibrating = br.calibrating || false;
@@ -296,7 +299,8 @@
         pbOn: pbOn, vol: vol, tracks: tracks, curTrack: curTrack,
         brActive: brActive, brCalibrating: brCalibrating, brBpm: brBpm,
         brStatusText: brStatusText, pollSec: pollSec,
-        sleepMode: sleepMode,
+        sleepMode: sleepMode, nightVision: nightVision,
+        statusLight: statusLight, micMute: micMute,
         s: s, soundSlider: soundSlider, motionSlider: motionSlider,
         cam: cam
       });
@@ -306,6 +310,7 @@
         pbOn: pbOn, curTrack: curTrack,
         brActive: brActive, brCalibrating: brCalibrating, brBpm: brBpm,
         brStatusText: brStatusText, sleepMode: sleepMode,
+        nightVision: nightVision, statusLight: statusLight, micMute: micMute,
         soundSlider: soundSlider, motionSlider: motionSlider,
         s: s, cam: cam
       });
@@ -408,6 +413,18 @@
             '<span class="ctrl-hint" id="ctrl-sleep-hint-' + uid + '">' + (d.sleepMode ? 'Camera is off' : 'Camera is on') + '</span>' +
           '</div>' +
           '<div class="ctrl-row">' +
+            '<span class="ctrl-label">Night Vision</span>' +
+            '<button class="toggle ' + (d.nightVision ? 'on' : '') + '" id="ctrl-nightvision-' + uid + '"></button>' +
+          '</div>' +
+          '<div class="ctrl-row">' +
+            '<span class="ctrl-label">Status LED</span>' +
+            '<button class="toggle ' + (d.statusLight ? 'on' : '') + '" id="ctrl-statuslight-' + uid + '"></button>' +
+          '</div>' +
+          '<div class="ctrl-row">' +
+            '<span class="ctrl-label">Mic Mute</span>' +
+            '<button class="toggle ' + (d.micMute ? 'on' : '') + '" id="ctrl-micmute-' + uid + '"></button>' +
+          '</div>' +
+          '<div class="ctrl-row">' +
             '<span class="ctrl-label">Sensor Poll</span>' +
             '<div class="slider-row">' +
               '<input type="range" id="ctrl-poll-' + uid + '" min="5" max="120" value="' + d.pollSec + '">' +
@@ -507,6 +524,27 @@
       sendControl(uid, 'sleep_mode', newVal);
     };
 
+    var nvBtn = document.getElementById('ctrl-nightvision-' + uid);
+    if (nvBtn) nvBtn.onclick = function() {
+      var newVal = !this.classList.contains('on');
+      this.classList.toggle('on', newVal);
+      sendControl(uid, 'night_vision', newVal);
+    };
+
+    var slBtn = document.getElementById('ctrl-statuslight-' + uid);
+    if (slBtn) slBtn.onclick = function() {
+      var newVal = !this.classList.contains('on');
+      this.classList.toggle('on', newVal);
+      sendControl(uid, 'status_light', newVal);
+    };
+
+    var mmBtn = document.getElementById('ctrl-micmute-' + uid);
+    if (mmBtn) mmBtn.onclick = function() {
+      var newVal = !this.classList.contains('on');
+      this.classList.toggle('on', newVal);
+      sendControl(uid, 'mic_mute', newVal);
+    };
+
     var pollSlider = document.getElementById('ctrl-poll-' + uid);
     var pollVal = document.getElementById('ctrl-poll-val-' + uid);
     if (pollSlider) {
@@ -555,6 +593,13 @@
     if (sleepSync) sleepSync.classList.toggle('on', d.sleepMode);
     var sleepHintSync = document.getElementById('ctrl-sleep-hint-' + uid);
     if (sleepHintSync) sleepHintSync.textContent = d.sleepMode ? 'Camera is off' : 'Camera is on';
+
+    var nvSync = document.getElementById('ctrl-nightvision-' + uid);
+    if (nvSync) nvSync.classList.toggle('on', d.nightVision);
+    var slSync = document.getElementById('ctrl-statuslight-' + uid);
+    if (slSync) slSync.classList.toggle('on', d.statusLight);
+    var mmSync = document.getElementById('ctrl-micmute-' + uid);
+    if (mmSync) mmSync.classList.toggle('on', d.micMute);
 
     var alertGrid = document.getElementById('alert-grid-' + uid);
     if (alertGrid) {
