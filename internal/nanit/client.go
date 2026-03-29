@@ -16,10 +16,10 @@ import (
 	pb "nanit-bridge/internal/nanit/nanitpb"
 )
 
-const (
-	keepaliveInterval  = 25 * time.Second
-	reconnectInterval  = 5 * time.Second
-	staleTimeout       = 90 * time.Second
+var (
+	keepaliveInterval = 25 * time.Second
+	reconnectInterval = 5 * time.Second
+	staleTimeout      = 90 * time.Second
 )
 
 type SensorUpdate struct {
@@ -57,7 +57,7 @@ type CameraClient struct {
 	onConnect       func()
 	onDisconnect    func()
 
-	done           chan struct{}
+	done            chan struct{}
 	wg              sync.WaitGroup
 	streamRetryMu   sync.Mutex
 	streamRetrying  bool
@@ -153,7 +153,9 @@ func (c *CameraClient) connect() error {
 		return fmt.Errorf("get access token: %w", err)
 	}
 
-	url := fmt.Sprintf("wss://api.nanit.com/focus/cameras/%s/user_connect", c.cameraUID)
+	wsBase := strings.Replace(apiBase, "https://", "wss://", 1)
+	wsBase = strings.Replace(wsBase, "http://", "ws://", 1)
+	url := fmt.Sprintf("%s/focus/cameras/%s/user_connect", wsBase, c.cameraUID)
 	header := http.Header{
 		"Authorization": []string{"Bearer " + token},
 	}
@@ -186,6 +188,11 @@ func (c *CameraClient) connect() error {
 	go c.keepaliveLoop(conn, errCh)
 	go c.sensorPollLoop()
 
+	if err := c.startStreaming(); err != nil {
+		log.Printf("[camera:%s] failed to start streaming: %v", c.cameraUID, err)
+		c.scheduleStreamRetry()
+	}
+
 	initRequests := []struct {
 		name string
 		fn   func() error
@@ -204,10 +211,6 @@ func (c *CameraClient) connect() error {
 		if err := r.fn(); err != nil {
 			log.Printf("[camera:%s] init %s: %v", c.cameraUID, r.name, err)
 		}
-	}
-	if err := c.startStreaming(); err != nil {
-		log.Printf("[camera:%s] failed to start streaming: %v", c.cameraUID, err)
-		c.scheduleStreamRetry()
 	}
 
 	var result error
@@ -883,4 +886,3 @@ func (c *CameraClient) RequestStatus() error {
 func (c *CameraClient) RequestFirmware() error {
 	return c.sendRequest(pb.RequestType_GET_FIRMWARE, nil)
 }
-

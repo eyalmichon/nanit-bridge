@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	apiBase    = "https://api.nanit.com"
 	apiVersion = "1"
 	// Nanit requires a mobile-style User-Agent for MFA to work.
 	userAgent = "Nanit/767 CFNetwork/1568.200.51 Darwin/24.1.0"
@@ -25,6 +24,16 @@ const (
 	// Default assumed TTL if the API doesn't return one.
 	defaultTokenTTL = 55 * time.Minute
 )
+
+var apiBase = "https://api.nanit.com"
+
+// SetAPIBaseForTest overrides the Nanit API base URL and returns a restore func.
+// Intended for integration/E2E tests that run against a mock cloud server.
+func SetAPIBaseForTest(base string) func() {
+	old := apiBase
+	apiBase = base
+	return func() { apiBase = old }
+}
 
 type Session struct {
 	AccessToken  string    `json:"access_token"`
@@ -57,6 +66,13 @@ func NewTokenManager(email, password, sessionFile string) *TokenManager {
 	}
 }
 
+func (tm *TokenManager) SetCredentials(email, password string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.session.Email = email
+	tm.password = password
+}
+
 func (tm *TokenManager) GetAccessToken() (string, error) {
 	tm.mu.RLock()
 	token := tm.session.AccessToken
@@ -74,6 +90,10 @@ func (tm *TokenManager) GetSession() Session {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 	return tm.session
+}
+
+func (tm *TokenManager) HTTPClient() *http.Client {
+	return tm.client
 }
 
 // Login performs initial email/password authentication.

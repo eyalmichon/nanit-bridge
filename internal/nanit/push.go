@@ -32,22 +32,22 @@ type PushCredentials struct {
 }
 
 type PushNotification struct {
-	Type    string `json:"type"`
-	BabyUID string `json:"baby_uid"`
+	Type    string  `json:"type"`
+	BabyUID string  `json:"baby_uid"`
 	Time    float64 `json:"time"`
-	ID      int64  `json:"id"`
+	ID      int64   `json:"id"`
 }
 
 type PushReceiver struct {
-	mu          sync.Mutex
-	creds       *PushCredentials
-	credsFile   string
-	tokenMgr    *TokenManager
-	client      *fcm.FCMClient
-	onMessage   func(PushNotification)
-	stopCh      chan struct{}
-	running     bool
-	staleCount  int
+	mu         sync.Mutex
+	creds      *PushCredentials
+	credsFile  string
+	tokenMgr   *TokenManager
+	client     *fcm.FCMClient
+	onMessage  func(PushNotification)
+	stopCh     chan struct{}
+	running    bool
+	staleCount int
 }
 
 func NewPushReceiver(tokenMgr *TokenManager, credsFile string) *PushReceiver {
@@ -161,7 +161,7 @@ func (p *PushReceiver) registerWithNanit(creds *PushCredentials) error {
 	req.Header.Set("nanit-api-version", apiVersion)
 	req.Header.Set("User-Agent", userAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.tokenMgr.HTTPClient().Do(req)
 	if err != nil {
 		return fmt.Errorf("POST /devices/android: %w", err)
 	}
