@@ -1,13 +1,15 @@
 package api
 
 import (
-	"crypto/rand"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -18,22 +20,12 @@ const (
 	sessionMaxAge     = 7 * 24 * time.Hour
 )
 
-type session struct {
-	expiresAt time.Time
-}
-
 type authManager struct {
 	authFile string
-
-	mu       sync.Mutex
-	sessions map[string]*session
 }
 
 func newAuthManager(authFile string) *authManager {
-	return &authManager{
-		authFile: authFile,
-		sessions: make(map[string]*session),
-	}
+	return &authManager{authFile: authFile}
 }
 
 func (a *authManager) readHashFromDisk() ([]byte, error) {
@@ -48,35 +40,42 @@ func (a *authManager) checkPassword(password string) bool {
 	return bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
 }
 
-func (a *authManager) createSession() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	token := hex.EncodeToString(b)
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.sessions[token] = &session{expiresAt: time.Now().Add(sessionMaxAge)}
-	return token
+// signedToken creates a cookie value: "expiry_unix.hmac_hex".
+// The HMAC key is derived from the bcrypt hash on disk, so changing
+// the password automatically invalidates all existing cookies.
+func (a *authManager) signedToken() (string, error) {
+	key, err := a.readHashFromDisk()
+	if err != nil {
+		return "", err
+	}
+	expiry := time.Now().Add(sessionMaxAge).Unix()
+	payload := strconv.FormatInt(expiry, 10)
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(payload))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	return fmt.Sprintf("%s.%s", payload, sig), nil
 }
 
-func (a *authManager) validateSession(token string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	s, ok := a.sessions[token]
-	if !ok {
+func (a *authManager) validateToken(token string) bool {
+	parts := strings.SplitN(token, ".", 2)
+	if len(parts) != 2 {
 		return false
 	}
-	if time.Now().After(s.expiresAt) {
-		delete(a.sessions, token)
-		return false
-	}
-	return true
-}
+	payload, sig := parts[0], parts[1]
 
-func (a *authManager) deleteSession(token string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	delete(a.sessions, token)
+	expiry, err := strconv.ParseInt(payload, 10, 64)
+	if err != nil || time.Now().Unix() > expiry {
+		return false
+	}
+
+	key, err := a.readHashFromDisk()
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(payload))
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(sig), []byte(expected))
 }
 
 func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +99,12 @@ func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := a.createSession()
+	token, err := a.signedToken()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
@@ -120,10 +124,6 @@ func (a *authManager) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if c, err := r.Cookie(sessionCookieName); err == nil {
-		a.deleteSession(c.Value)
-	}
-
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
@@ -138,7 +138,7 @@ func (a *authManager) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // authMiddleware wraps a handler and enforces session auth on all routes except
-// the login page, login API, and static login assets.
+// the login page, login API, and shared static assets.
 func (a *authManager) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -153,7 +153,7 @@ func (a *authManager) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		c, err := r.Cookie(sessionCookieName)
-		if err != nil || !a.validateSession(c.Value) {
+		if err != nil || !a.validateToken(c.Value) {
 			if isAPIRequest(r) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
