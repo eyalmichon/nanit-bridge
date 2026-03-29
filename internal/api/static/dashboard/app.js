@@ -8,6 +8,72 @@
   var notifSettings = {};
   var ws;
   var reconnectDelay = 1000;
+  var nanitConnected = true;
+
+  var nanitAuthModal = document.getElementById('nanitAuthModal');
+  var nanitAuthHint = document.getElementById('nanitAuthHint');
+  var nanitLoginForm = document.getElementById('nanitLoginForm');
+  var nanitMfaForm = document.getElementById('nanitMfaForm');
+  var nanitLoginBtn = document.getElementById('nanitLoginBtn');
+  var nanitMfaBtn = document.getElementById('nanitMfaBtn');
+  var nanitEmail = document.getElementById('nanitEmail');
+  var nanitPassword = document.getElementById('nanitPassword');
+  var nanitMfaCode = document.getElementById('nanitMfaCode');
+  var nanitAuthError = document.getElementById('nanitAuthError');
+  var nanitAuthSuccess = document.getElementById('nanitAuthSuccess');
+
+  function showNanitError(msg) {
+    nanitAuthError.textContent = msg || 'Request failed.';
+    nanitAuthError.classList.remove('hidden');
+  }
+
+  function hideNanitError() {
+    nanitAuthError.textContent = '';
+    nanitAuthError.classList.add('hidden');
+  }
+
+  function showNanitSuccess(msg) {
+    nanitAuthSuccess.textContent = msg || 'Saved.';
+    nanitAuthSuccess.classList.remove('hidden');
+  }
+
+  function hideNanitSuccess() {
+    nanitAuthSuccess.textContent = '';
+    nanitAuthSuccess.classList.add('hidden');
+  }
+
+  function setNanitConnected(connected, email) {
+    nanitConnected = !!connected;
+    if (nanitConnected) {
+      nanitAuthModal.classList.add('hidden');
+      hideNanitError();
+      hideNanitSuccess();
+      nanitMfaForm.classList.add('hidden');
+      return;
+    }
+    nanitAuthHint.textContent = email
+      ? ('Nanit account (' + email + ') is disconnected. Reconnect to resume streaming and controls.')
+      : 'Reconnect your Nanit account to resume camera streaming and controls.';
+    nanitAuthModal.classList.remove('hidden');
+  }
+
+  function refreshNanitStatus() {
+    return fetch('/api/nanit/status')
+      .then(function(r) {
+        if (handleAuthError(r)) return null;
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then(function(d) {
+        if (!d) return;
+        setNanitConnected(d.connected, d.email || '');
+        if (!d.connected) {
+          emptyState.querySelector('h2').textContent = 'Nanit account disconnected';
+          emptyState.querySelector('p').textContent = 'Reconnect from this modal or from /settings.';
+        }
+      })
+      .catch(function() {});
+  }
 
   // ── WebSocket ──────────────────────────────────────────
 
@@ -28,6 +94,7 @@
       wsDot.classList.add('connected');
       wsLabel.textContent = 'live';
       reconnectDelay = 1000;
+      refreshNanitStatus();
     };
     ws.onerror = function() {
       if (!closing) { closing = true; try { ws.close(); } catch(e) {} scheduleReconnect(); }
@@ -42,6 +109,7 @@
         (msg.babies || []).forEach(function(b) { babies[b.uid] = b; });
         Object.keys(players).forEach(destroyPlayer);
         renderAll();
+        refreshNanitStatus();
       } else if (msg.type === 'state_update') {
         var prev = babies[msg.baby.uid];
         babies[msg.baby.uid] = msg.baby;
@@ -58,7 +126,17 @@
 
   function renderAll() {
     var uids = Object.keys(babies);
-    if (uids.length === 0) { emptyState.style.display = ''; return; }
+    if (uids.length === 0) {
+      emptyState.style.display = '';
+      if (!nanitConnected) {
+        emptyState.querySelector('h2').textContent = 'Nanit account disconnected';
+        emptyState.querySelector('p').textContent = 'Reconnect from this modal or from /settings.';
+      } else {
+        emptyState.querySelector('h2').textContent = 'Waiting for data...';
+        emptyState.querySelector('p').textContent = 'Connecting to nanit-bridge WebSocket';
+      }
+      return;
+    }
     emptyState.style.display = 'none';
     babiesEl.querySelectorAll('.baby-card').forEach(function(el) {
       if (!babies[el.dataset.uid]) { destroyPlayer(el.dataset.uid); el.remove(); }
@@ -84,6 +162,7 @@
     fetch('/api/babies/' + uid + '/notification_settings')
       .then(function(r) { if (handleAuthError(r)) return; return r.json(); })
       .then(function(d) {
+        if (!d) return;
         notifSettings[uid] = d.settings || {};
         renderNotifToggles(uid);
       })
@@ -100,8 +179,8 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: key, enabled: newVal })
     })
-    .then(function(r) { return r.json(); })
-    .then(function(d) { notifSettings[uid] = d.settings || {}; renderNotifToggles(uid); })
+    .then(function(r) { if (handleAuthError(r)) return null; return r.json(); })
+    .then(function(d) { if (!d) return; notifSettings[uid] = d.settings || {}; renderNotifToggles(uid); })
     .catch(function(e) { console.error('toggle notif error:', e); });
   }
 
@@ -723,9 +802,12 @@
   }
 
   function esc(s) {
-    var d = document.createElement('div');
-    d.textContent = s || '';
-    return d.innerHTML;
+    if (!s) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   // ── Log panel ──────────────────────────────────────────
@@ -762,12 +844,8 @@
   }
 
   function appendLogLines(lines) {
-    logContent.textContent = '';
-    logLineCount = 0;
-    for (var i = 0; i < lines.length; i++) {
-      logLineCount++;
-      logContent.textContent += lines[i] + '\n';
-    }
+    logLineCount = lines.length;
+    logContent.textContent = lines.length ? (lines.join('\n') + '\n') : '';
     logBadge.textContent = logLineCount + ' lines';
     logBody.scrollTop = logBody.scrollHeight;
   }
@@ -779,8 +857,78 @@
       window.location.href = '/login';
       return true;
     }
+    if (r && r.status === 503) {
+      refreshNanitStatus();
+    }
     return false;
   }
+
+  nanitLoginForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    hideNanitError();
+    hideNanitSuccess();
+    nanitLoginBtn.disabled = true;
+    nanitLoginBtn.textContent = 'Connecting...';
+
+    fetch('/api/nanit/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: nanitEmail.value,
+        password: nanitPassword.value
+      })
+    }).then(function(r) {
+      if (handleAuthError(r)) return null;
+      if (!r.ok) return r.text().then(function(t) { throw new Error(t || 'Login failed'); });
+      return r.json();
+    }).then(function(d) {
+      if (!d) return;
+      if (d.status === 'mfa_required') {
+        nanitMfaForm.classList.remove('hidden');
+        showNanitSuccess('MFA required. Enter the code from your phone.');
+        return;
+      }
+      nanitMfaForm.classList.add('hidden');
+      showNanitSuccess('Connected successfully.');
+      setNanitConnected(true, nanitEmail.value);
+      refreshNanitStatus();
+    }).catch(function(err) {
+      showNanitError(err.message || 'Login failed.');
+    }).finally(function() {
+      nanitLoginBtn.disabled = false;
+      nanitLoginBtn.textContent = 'Connect';
+    });
+  });
+
+  nanitMfaForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    hideNanitError();
+    hideNanitSuccess();
+    nanitMfaBtn.disabled = true;
+    nanitMfaBtn.textContent = 'Verifying...';
+
+    fetch('/api/nanit/mfa', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: nanitMfaCode.value })
+    }).then(function(r) {
+      if (handleAuthError(r)) return null;
+      if (!r.ok) return r.text().then(function(t) { throw new Error(t || 'MFA failed'); });
+      return r.json();
+    }).then(function(d) {
+      if (!d) return;
+      nanitMfaForm.classList.add('hidden');
+      nanitMfaCode.value = '';
+      setNanitConnected(true, nanitEmail.value);
+      showNanitSuccess('Connected successfully.');
+      refreshNanitStatus();
+    }).catch(function(err) {
+      showNanitError(err.message || 'MFA failed.');
+    }).finally(function() {
+      nanitMfaBtn.disabled = false;
+      nanitMfaBtn.textContent = 'Verify MFA';
+    });
+  });
 
   document.getElementById('logoutBtn').onclick = function() {
     fetch('/api/auth/logout', { method: 'POST' }).finally(function() {
@@ -790,5 +938,7 @@
 
   // ── Boot ───────────────────────────────────────────────
 
+  refreshNanitStatus();
+  setInterval(refreshNanitStatus, 30000);
   connect();
 })();

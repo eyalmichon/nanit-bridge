@@ -16,6 +16,7 @@ import (
 	"github.com/notedit/rtmp/format/flv"
 
 	"nanit-bridge/internal/baby"
+	"nanit-bridge/internal/nanit"
 	rtmpserver "nanit-bridge/internal/rtmp"
 )
 
@@ -100,6 +101,7 @@ type Server struct {
 	rtmpServer *rtmpserver.Server
 	logBcast   *LogBroadcaster
 	auth       *authManager
+	nanitAuth  *nanitAuthManager
 
 	mu      sync.Mutex
 	clients map[*wsClient]struct{}
@@ -111,13 +113,88 @@ type wsClient struct {
 	closed bool
 }
 
-func NewServer(port int, manager *baby.Manager, rtmpServer *rtmpserver.Server, logBcast *LogBroadcaster, authFile string) *Server {
+type babiesResponse struct {
+	Babies []babyJSON `json:"babies"`
+}
+
+type wsInitialMessage struct {
+	Type   string     `json:"type"`
+	Babies []babyJSON `json:"babies"`
+}
+
+type babyJSON struct {
+	UID           string         `json:"uid"`
+	CameraUID     string         `json:"camera_uid"`
+	Name          string         `json:"name"`
+	WSAlive       bool           `json:"ws_alive"`
+	Stream        string         `json:"stream"`
+	RTMPActive    bool           `json:"rtmp_active"`
+	SensorPollSec int            `json:"sensor_poll_sec"`
+	PushActive    bool           `json:"push_active"`
+	Sensors       sensorJSON     `json:"sensors"`
+	Controls      controlJSON    `json:"controls"`
+	Camera        cameraInfoJSON `json:"camera"`
+}
+
+type sensorJSON struct {
+	Temperature   float64 `json:"temperature"`
+	Humidity      float64 `json:"humidity"`
+	Light         float64 `json:"light"`
+	IsNight       bool    `json:"is_night"`
+	CryDetected   bool    `json:"cry_detected"`
+	CryDetectedAt string  `json:"cry_detected_at"`
+	SoundAlert    bool    `json:"sound_alert"`
+	SoundAlertAt  string  `json:"sound_alert_at"`
+	MotionAlert   bool    `json:"motion_alert"`
+	MotionAlertAt string  `json:"motion_alert_at"`
+	LastUpdate    string  `json:"last_update"`
+}
+
+type controlJSON struct {
+	NightLight           bool                  `json:"night_light"`
+	NightLightBrightness int                   `json:"night_light_brightness"`
+	NightLightTimeout    int                   `json:"night_light_timeout"`
+	Volume               int                   `json:"volume"`
+	Playback             bool                  `json:"playback"`
+	CurrentTrack         string                `json:"current_track"`
+	Soundtracks          []baby.SoundtrackInfo `json:"soundtracks"`
+	SoundSensitivity     int                   `json:"sound_sensitivity"`
+	MotionSensitivity    int                   `json:"motion_sensitivity"`
+	SleepMode            bool                  `json:"sleep_mode"`
+	NightVision          bool                  `json:"night_vision"`
+	StatusLight          bool                  `json:"status_light"`
+	MicMute              bool                  `json:"mic_mute"`
+	Breathing            breathingControlJSON  `json:"breathing"`
+}
+
+type breathingControlJSON struct {
+	Active        bool `json:"active"`
+	Calibrating   bool `json:"calibrating"`
+	BreathsPerMin int  `json:"breaths_per_min"`
+}
+
+type cameraInfoJSON struct {
+	FirmwareVersion string `json:"firmware_version"`
+	HardwareVersion string `json:"hardware_version"`
+	MountingMode    string `json:"mounting_mode"`
+}
+
+func NewServer(
+	port int,
+	manager *baby.Manager,
+	rtmpServer *rtmpserver.Server,
+	logBcast *LogBroadcaster,
+	authFile string,
+	tokenMgr *nanit.TokenManager,
+	onNanitAuth func() error,
+) *Server {
 	s := &Server{
 		port:       port,
 		manager:    manager,
 		rtmpServer: rtmpServer,
 		logBcast:   logBcast,
 		auth:       newAuthManager(authFile),
+		nanitAuth:  newNanitAuthManager(tokenMgr, manager, onNanitAuth),
 		clients:    make(map[*wsClient]struct{}),
 	}
 
@@ -141,8 +218,13 @@ func NewServer(port int, manager *baby.Manager, rtmpServer *rtmpserver.Server, l
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/api/auth/setup", s.auth.handleSetup)
 	mux.HandleFunc("/api/auth/login", s.auth.handleLogin)
+	mux.HandleFunc("/api/auth/change-password", s.auth.handleChangePassword)
 	mux.HandleFunc("/api/auth/logout", s.auth.handleLogout)
+	mux.HandleFunc("/api/nanit/status", s.nanitAuth.handleStatus)
+	mux.HandleFunc("/api/nanit/login", s.nanitAuth.handleLogin)
+	mux.HandleFunc("/api/nanit/mfa", s.nanitAuth.handleMFA)
 	mux.HandleFunc("/api/babies", s.handleBabies)
 	mux.HandleFunc("/api/babies/", s.handleBabyOrControl)
 	mux.HandleFunc("/api/stream/", s.handleStreamFLV)
@@ -160,6 +242,10 @@ func (s *Server) Start() error {
 			http.ServeFileFS(w, r, staticFS, "dashboard/index.html")
 		case "/login", "/login/", "/login/index.html":
 			http.ServeFileFS(w, r, staticFS, "login/index.html")
+		case "/setup", "/setup/", "/setup/index.html":
+			http.ServeFileFS(w, r, staticFS, "setup/index.html")
+		case "/settings", "/settings/", "/settings/index.html":
+			http.ServeFileFS(w, r, staticFS, "settings/index.html")
 		default:
 			fileServer.ServeHTTP(w, r)
 		}
@@ -218,15 +304,13 @@ func (s *Server) handleBabies(w http.ResponseWriter, r *http.Request) {
 	}
 
 	states := s.manager.AllStates()
-	babies := make([]interface{}, 0, len(states))
+	babies := make([]babyJSON, 0, len(states))
 	for uid, state := range states {
 		babies = append(babies, s.buildBabyJSON(uid, state))
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"babies": babies,
-	})
+	json.NewEncoder(w).Encode(babiesResponse{Babies: babies})
 }
 
 func (s *Server) handleBabyOrControl(w http.ResponseWriter, r *http.Request) {
@@ -457,13 +541,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	// Send initial state snapshot.
 	states := s.manager.AllStates()
-	babies := make([]interface{}, 0, len(states))
+	babies := make([]babyJSON, 0, len(states))
 	for uid, state := range states {
 		babies = append(babies, s.buildBabyJSON(uid, state))
 	}
-	initial, _ := json.Marshal(map[string]interface{}{
-		"type":   "initial",
-		"babies": babies,
+	initial, _ := json.Marshal(wsInitialMessage{
+		Type:   "initial",
+		Babies: babies,
 	})
 	client.send <- initial
 
@@ -560,54 +644,54 @@ func (s *Server) handleStreamFLV(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) buildBabyJSON(uid string, state *baby.State) map[string]interface{} {
+func (s *Server) buildBabyJSON(uid string, state *baby.State) babyJSON {
 	sensors, controls, camera, stream, wsAlive := state.Snapshot()
-	return map[string]interface{}{
-		"uid":             uid,
-		"camera_uid":      state.CameraUID,
-		"name":            state.Name,
-		"ws_alive":        wsAlive,
-		"stream":          stream.String(),
-		"rtmp_active":     s.rtmpServer.HasStream(uid),
-		"sensor_poll_sec": s.manager.GetSensorPollInterval(uid),
-		"push_active":     s.manager.IsPushActive(),
-		"sensors": map[string]interface{}{
-			"temperature":     sensors.Temperature,
-			"humidity":        sensors.Humidity,
-			"light":           sensors.Light,
-			"is_night":        sensors.IsNight,
-			"cry_detected":    sensors.CryDetected,
-			"cry_detected_at": sensors.CryDetectedAt.Format(time.RFC3339),
-			"sound_alert":     sensors.SoundAlert,
-			"sound_alert_at":  sensors.SoundAlertAt.Format(time.RFC3339),
-			"motion_alert":    sensors.MotionAlert,
-			"motion_alert_at": sensors.MotionAlertAt.Format(time.RFC3339),
-			"last_update":     sensors.LastUpdate.Format(time.RFC3339),
+	return babyJSON{
+		UID:           uid,
+		CameraUID:     state.CameraUID,
+		Name:          state.Name,
+		WSAlive:       wsAlive,
+		Stream:        stream.String(),
+		RTMPActive:    s.rtmpServer.HasStream(uid),
+		SensorPollSec: s.manager.GetSensorPollInterval(uid),
+		PushActive:    s.manager.IsPushActive(),
+		Sensors: sensorJSON{
+			Temperature:   sensors.Temperature,
+			Humidity:      sensors.Humidity,
+			Light:         sensors.Light,
+			IsNight:       sensors.IsNight,
+			CryDetected:   sensors.CryDetected,
+			CryDetectedAt: sensors.CryDetectedAt.Format(time.RFC3339),
+			SoundAlert:    sensors.SoundAlert,
+			SoundAlertAt:  sensors.SoundAlertAt.Format(time.RFC3339),
+			MotionAlert:   sensors.MotionAlert,
+			MotionAlertAt: sensors.MotionAlertAt.Format(time.RFC3339),
+			LastUpdate:    sensors.LastUpdate.Format(time.RFC3339),
 		},
-		"controls": map[string]interface{}{
-			"night_light":            controls.NightLight,
-			"night_light_brightness": controls.NightLightBrightness,
-			"night_light_timeout":    controls.NightLightTimeout,
-			"volume":                 controls.Volume,
-			"playback":               controls.PlaybackActive,
-			"current_track":          controls.CurrentTrack,
-			"soundtracks":            controls.Soundtracks,
-			"sound_sensitivity":      controls.SoundSensitivity,
-			"motion_sensitivity":     controls.MotionSensitivity,
-			"sleep_mode":             controls.SleepMode,
-			"night_vision":           controls.NightVision,
-			"status_light":           controls.StatusLight,
-			"mic_mute":               controls.MicMute,
-			"breathing": map[string]interface{}{
-				"active":          controls.Breathing.Active,
-				"calibrating":     controls.Breathing.Calibrating,
-				"breaths_per_min": controls.Breathing.BreathsPerMin,
+		Controls: controlJSON{
+			NightLight:           controls.NightLight,
+			NightLightBrightness: controls.NightLightBrightness,
+			NightLightTimeout:    controls.NightLightTimeout,
+			Volume:               controls.Volume,
+			Playback:             controls.PlaybackActive,
+			CurrentTrack:         controls.CurrentTrack,
+			Soundtracks:          controls.Soundtracks,
+			SoundSensitivity:     controls.SoundSensitivity,
+			MotionSensitivity:    controls.MotionSensitivity,
+			SleepMode:            controls.SleepMode,
+			NightVision:          controls.NightVision,
+			StatusLight:          controls.StatusLight,
+			MicMute:              controls.MicMute,
+			Breathing: breathingControlJSON{
+				Active:        controls.Breathing.Active,
+				Calibrating:   controls.Breathing.Calibrating,
+				BreathsPerMin: controls.Breathing.BreathsPerMin,
 			},
 		},
-		"camera": map[string]interface{}{
-			"firmware_version": camera.FirmwareVersion,
-			"hardware_version": camera.HardwareVersion,
-			"mounting_mode":    camera.MountingMode,
+		Camera: cameraInfoJSON{
+			FirmwareVersion: camera.FirmwareVersion,
+			HardwareVersion: camera.HardwareVersion,
+			MountingMode:    camera.MountingMode,
 		},
 	}
 }

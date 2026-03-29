@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nanit-bridge - settings</title>
+  <link rel="stylesheet" href="/shared/style.css">
+</head>
+<body>
+  <header>
+    <h1>Settings</h1>
+    <div class="header-right">
+      <a class="nav-link-btn" href="/">Back to dashboard</a>
+      <button class="logout-btn" id="logoutBtn" title="Sign out">Sign out</button>
+    </div>
+  </header>
+
+  <main class="settings-wrap">
+    <section class="settings-card">
+      <h2>Nanit Account</h2>
+      <p class="settings-subtle" id="nanitStatusText">Checking connection...</p>
+
+      <form id="nanitLoginForm" class="settings-form">
+        <label for="nanitEmail">Email</label>
+        <input type="email" id="nanitEmail" autocomplete="username" required>
+
+        <label for="nanitPassword">Password</label>
+        <input type="password" id="nanitPassword" autocomplete="current-password" required>
+
+        <button type="submit" class="primary-btn" id="nanitLoginBtn">Connect</button>
+      </form>
+
+      <form id="nanitMfaForm" class="settings-form hidden">
+        <label for="nanitMfaCode">MFA code</label>
+        <input type="text" id="nanitMfaCode" inputmode="numeric" autocomplete="one-time-code" required>
+        <button type="submit" class="primary-btn" id="nanitMfaBtn">Verify MFA</button>
+      </form>
+
+      <p class="form-error hidden" id="nanitError"></p>
+      <p class="form-success hidden" id="nanitSuccess"></p>
+    </section>
+
+    <section class="settings-card">
+      <h2>Dashboard Password</h2>
+      <p class="settings-subtle">Changing your password signs out all active dashboard sessions.</p>
+
+      <form id="passwordForm" class="settings-form">
+        <label for="currentPassword">Current password</label>
+        <input type="password" id="currentPassword" autocomplete="current-password" required>
+
+        <label for="newPassword">New password</label>
+        <input type="password" id="newPassword" autocomplete="new-password" required>
+
+        <label for="confirmPassword">Confirm new password</label>
+        <input type="password" id="confirmPassword" autocomplete="new-password" required>
+
+        <button type="submit" class="primary-btn" id="passwordBtn">Change password</button>
+      </form>
+
+      <p class="form-error hidden" id="passwordError"></p>
+      <p class="form-success hidden" id="passwordSuccess"></p>
+    </section>
+  </main>
+
+  <script src="/settings/settings.js"></script>
+</body>
+</html>

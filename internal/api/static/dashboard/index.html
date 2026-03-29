@@ -15,6 +15,7 @@
         <div class="ws-dot" id="wsDot"></div>
         <span id="wsLabel">connecting...</span>
       </div>
+      <a class="nav-link-btn" href="/settings" title="Settings">Settings</a>
       <button class="logout-btn" id="logoutBtn" title="Sign out">Sign out</button>
     </div>
   </header>
@@ -32,6 +33,29 @@
     </div>
     <div class="log-body" id="logBody">
       <pre id="logContent"></pre>
+    </div>
+  </div>
+  <div class="auth-modal hidden" id="nanitAuthModal">
+    <div class="auth-modal-card">
+      <h2>Nanit connection required</h2>
+      <p id="nanitAuthHint">Reconnect your Nanit account to resume camera streaming and controls.</p>
+
+      <form id="nanitLoginForm" class="settings-form">
+        <label for="nanitEmail">Email</label>
+        <input type="email" id="nanitEmail" autocomplete="username" required>
+        <label for="nanitPassword">Password</label>
+        <input type="password" id="nanitPassword" autocomplete="current-password" required>
+        <button type="submit" class="primary-btn" id="nanitLoginBtn">Connect</button>
+      </form>
+
+      <form id="nanitMfaForm" class="settings-form hidden">
+        <label for="nanitMfaCode">MFA code</label>
+        <input type="text" id="nanitMfaCode" inputmode="numeric" autocomplete="one-time-code" required>
+        <button type="submit" class="primary-btn" id="nanitMfaBtn">Verify MFA</button>
+      </form>
+
+      <p class="form-error hidden" id="nanitAuthError"></p>
+      <p class="form-success hidden" id="nanitAuthSuccess"></p>
     </div>
   </div>
   <script src="/dashboard/app.js"></script>

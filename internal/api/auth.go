@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -22,6 +24,7 @@ const (
 
 type authManager struct {
 	authFile string
+	mu       sync.Mutex
 }
 
 func newAuthManager(authFile string) *authManager {
@@ -30,6 +33,27 @@ func newAuthManager(authFile string) *authManager {
 
 func (a *authManager) readHashFromDisk() ([]byte, error) {
 	return os.ReadFile(a.authFile)
+}
+
+func (a *authManager) hasPasswordHash() bool {
+	_, err := os.Stat(a.authFile)
+	return err == nil
+}
+
+func (a *authManager) writeHash(password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("bcrypt error: %w", err)
+	}
+	if dir := filepath.Dir(a.authFile); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("mkdir auth dir: %w", err)
+		}
+	}
+	if err := os.WriteFile(a.authFile, hash, 0o600); err != nil {
+		return fmt.Errorf("write auth file: %w", err)
+	}
+	return nil
 }
 
 func (a *authManager) checkPassword(password string) bool {
@@ -118,6 +142,91 @@ func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+func (a *authManager) handleSetup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		Password string `json:"password"`
+		Confirm  string `json:"confirm"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	body.Password = strings.TrimSpace(body.Password)
+	if body.Password == "" || body.Confirm == "" {
+		http.Error(w, "password is required", http.StatusBadRequest)
+		return
+	}
+	if body.Password != body.Confirm {
+		http.Error(w, "passwords do not match", http.StatusBadRequest)
+		return
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.hasPasswordHash() {
+		http.Error(w, "dashboard password already configured", http.StatusConflict)
+		return
+	}
+	if err := a.writeHash(body.Password); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (a *authManager) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+		ConfirmPassword string `json:"confirm_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if body.CurrentPassword == "" || body.NewPassword == "" || body.ConfirmPassword == "" {
+		http.Error(w, "all password fields are required", http.StatusBadRequest)
+		return
+	}
+	if body.NewPassword != body.ConfirmPassword {
+		http.Error(w, "new passwords do not match", http.StatusBadRequest)
+		return
+	}
+	if !a.checkPassword(body.CurrentPassword) {
+		http.Error(w, "invalid current password", http.StatusUnauthorized)
+		return
+	}
+	if err := a.writeHash(body.NewPassword); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Invalidate existing cookie after password change.
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
 func (a *authManager) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -142,6 +251,25 @@ func (a *authManager) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (a *authManager) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+
+		if !a.hasPasswordHash() {
+			if path == "/setup" || path == "/setup/" ||
+				strings.HasPrefix(path, "/setup/") ||
+				path == "/api/auth/setup" ||
+				strings.HasPrefix(path, "/shared/") ||
+				path == "/favicon.ico" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if isAPIRequest(r) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				json.NewEncoder(w).Encode(map[string]string{"error": "setup_required"})
+			} else {
+				http.Redirect(w, r, "/setup", http.StatusFound)
+			}
+			return
+		}
 
 		if path == "/login" || path == "/login/" ||
 			strings.HasPrefix(path, "/login/") ||

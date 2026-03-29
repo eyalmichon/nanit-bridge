@@ -40,18 +40,17 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	if _, err := os.Stat(cfg.DashboardAuthFile); os.IsNotExist(err) {
-		log.Fatalf("dashboard password not set — run: nanit-bridge --reset-dashboard-password")
+	if _, err := os.Stat(cfg.DashboardAuthFile); os.IsNotExist(err) && cfg.DashboardPassword != "" {
+		if err := writeDashboardPasswordHash(cfg.DashboardAuthFile, cfg.DashboardPassword); err != nil {
+			log.Fatalf("failed to initialize dashboard password from NANIT_DASHBOARD_PASSWORD: %v", err)
+		}
+		log.Printf("initialized dashboard password hash at %s from NANIT_DASHBOARD_PASSWORD", cfg.DashboardAuthFile)
 	}
 
 	tokenMgr := nanit.NewTokenManager(cfg.NanitEmail, cfg.NanitPassword, cfg.SessionFile)
 
 	if err := tokenMgr.LoadSession(); err != nil {
 		log.Printf("warning: could not load session: %v", err)
-	}
-
-	if err := ensureAuth(tokenMgr, cfg); err != nil {
-		log.Fatalf("authentication failed: %v", err)
 	}
 
 	rtmpServer := rtmp.NewServer(cfg.RTMPPort)
@@ -80,7 +79,32 @@ func main() {
 		mgr.RestartStream(streamKey)
 	})
 
-	apiServer := api.NewServer(cfg.HTTPPort, mgr, rtmpServer, logBcast, cfg.DashboardAuthFile)
+	startOrRestartManager := func() error {
+		if mgr.IsStarted() {
+			if err := mgr.Restart(); err != nil {
+				return fmt.Errorf("restart manager: %w", err)
+			}
+		} else if err := mgr.Start(); err != nil {
+			return fmt.Errorf("start manager: %w", err)
+		}
+
+		if mqttPub != nil {
+			for uid, state := range mgr.AllStates() {
+				mqttPub.PublishDiscovery(uid, state.Name)
+			}
+		}
+		return nil
+	}
+
+	apiServer := api.NewServer(
+		cfg.HTTPPort,
+		mgr,
+		rtmpServer,
+		logBcast,
+		cfg.DashboardAuthFile,
+		tokenMgr,
+		startOrRestartManager,
+	)
 
 	mgr.OnStateChange(func(babyUID string, state *baby.State) {
 		if mqttPub != nil {
@@ -89,17 +113,16 @@ func main() {
 		apiServer.BroadcastState(babyUID, state)
 	})
 
-	if err := mgr.Start(); err != nil {
-		log.Fatalf("baby manager: %v", err)
-	}
-
 	if err := apiServer.Start(); err != nil {
 		log.Fatalf("api server: %v", err)
 	}
 
-	if mqttPub != nil {
-		for uid, state := range mgr.AllStates() {
-			mqttPub.PublishDiscovery(uid, state.Name)
+	if err := ensureAuth(tokenMgr, cfg, term.IsTerminal(int(syscall.Stdin))); err != nil {
+		log.Printf("nanit cloud auth pending: %v", err)
+		log.Printf("dashboard is available; connect via /settings or the dashboard auth modal")
+	} else {
+		if err := startOrRestartManager(); err != nil {
+			log.Printf("nanit authenticated but manager start failed: %v", err)
 		}
 	}
 
@@ -118,7 +141,7 @@ func main() {
 	mgr.Stop()
 }
 
-func ensureAuth(tokenMgr *nanit.TokenManager, cfg *config.Config) error {
+func ensureAuth(tokenMgr *nanit.TokenManager, cfg *config.Config, interactive bool) error {
 	// Try refreshing existing session.
 	session := tokenMgr.GetSession()
 	if session.RefreshToken != "" {
@@ -130,11 +153,34 @@ func ensureAuth(tokenMgr *nanit.TokenManager, cfg *config.Config) error {
 		log.Printf("saved session expired: %v", err)
 	}
 
-	if cfg.NanitEmail == "" || cfg.NanitPassword == "" {
-		return fmt.Errorf("no valid session and NANIT_EMAIL/NANIT_PASSWORD not set")
+	email := cfg.NanitEmail
+	password := cfg.NanitPassword
+
+	if email == "" || password == "" {
+		if !interactive {
+			return fmt.Errorf("no valid session and NANIT_EMAIL/NANIT_PASSWORD not set")
+		}
+		reader := bufio.NewReader(os.Stdin)
+		if email == "" {
+			fmt.Print("Nanit email: ")
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("reading email: %w", err)
+			}
+			email = strings.TrimSpace(line)
+		}
+		if password == "" {
+			fmt.Print("Nanit password: ")
+			pw, err := term.ReadPassword(int(syscall.Stdin))
+			fmt.Println()
+			if err != nil {
+				return fmt.Errorf("reading password: %w", err)
+			}
+			password = string(pw)
+		}
+		tokenMgr.SetCredentials(email, password)
 	}
 
-	// Fresh login required.
 	mfaToken, err := tokenMgr.Login()
 	if err != nil {
 		return fmt.Errorf("login: %w", err)
@@ -191,20 +237,29 @@ func resetDashboardPassword() {
 		os.Exit(1)
 	}
 
-	hash, err := bcrypt.GenerateFromPassword(pw1, bcrypt.DefaultCost)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "bcrypt error: %v\n", err)
-		os.Exit(1)
-	}
-
-	if dir := filepath.Dir(authFile); dir != "." {
-		os.MkdirAll(dir, 0o755)
-	}
-
-	if err := os.WriteFile(authFile, hash, 0o600); err != nil {
+	if err := writeDashboardPasswordHash(authFile, string(pw1)); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", authFile, err)
 		os.Exit(1)
 	}
 
 	fmt.Printf("Dashboard password saved to %s\n", authFile)
+}
+
+func writeDashboardPasswordHash(authFile, password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("bcrypt error: %w", err)
+	}
+
+	if dir := filepath.Dir(authFile); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+
+	if err := os.WriteFile(authFile, hash, 0o600); err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -28,7 +28,8 @@ type Config struct {
 	SessionFile      string
 	PushCredsFile    string
 	DashboardAuthFile string
-	LogLevel         string
+	DashboardPassword string
+	LogLevel          string
 }
 
 // LoadEnvFile loads .env if present without overriding existing env vars.
@@ -48,9 +49,10 @@ func Load() (*Config, error) {
 		MQTTPassword:  os.Getenv("NANIT_MQTT_PASSWORD"),
 		MQTTPrefix:    envOrDefault("NANIT_MQTT_PREFIX", "nanit"),
 		SessionFile:   envOrDefault("NANIT_SESSION_FILE", "/data/session.json"),
-		PushCredsFile:    envOrDefault("NANIT_PUSH_CREDS_FILE", "/data/push_creds.json"),
+		PushCredsFile: envOrDefault("NANIT_PUSH_CREDS_FILE", "/data/push_creds.json"),
 		DashboardAuthFile: envOrDefault("NANIT_DASHBOARD_AUTH_FILE", "/data/dashboard_password.hash"),
-		LogLevel:         envOrDefault("NANIT_LOG_LEVEL", "info"),
+		DashboardPassword: os.Getenv("NANIT_DASHBOARD_PASSWORD"),
+		LogLevel:          envOrDefault("NANIT_LOG_LEVEL", "info"),
 	}
 
 	port, err := strconv.Atoi(envOrDefault("NANIT_RTMP_PORT", "1935"))

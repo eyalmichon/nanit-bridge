@@ -30,6 +30,7 @@ type Manager struct {
 	stopCh        chan struct{}
 	pushReceiver  *nanit.PushReceiver
 	rtmpSub       StreamSubscriber
+	started       bool
 
 	onStateChange func(babyUID string, state *State)
 }
@@ -62,6 +63,15 @@ func (m *Manager) OnStateChange(fn func(string, *State)) {
 }
 
 func (m *Manager) Start() error {
+	m.mu.Lock()
+	if m.started {
+		m.mu.Unlock()
+		return nil
+	}
+	m.started = true
+	m.stopCh = make(chan struct{})
+	m.mu.Unlock()
+
 	babies, err := m.tokenMgr.FetchBabies()
 	if err != nil {
 		session := m.tokenMgr.GetSession()
@@ -69,11 +79,19 @@ func (m *Manager) Start() error {
 			log.Printf("[manager] using cached baby list (%d babies)", len(session.Babies))
 			babies = session.Babies
 		} else {
+			m.mu.Lock()
+			m.started = false
+			close(m.stopCh)
+			m.mu.Unlock()
 			return fmt.Errorf("fetch babies: %w", err)
 		}
 	}
 
 	log.Printf("[manager] found %d baby/camera(s)", len(babies))
+
+	m.mu.Lock()
+	m.babies = make(map[string]*ManagedBaby)
+	m.mu.Unlock()
 
 	for _, b := range babies {
 		m.startBaby(b)
@@ -94,19 +112,36 @@ func (m *Manager) Start() error {
 }
 
 func (m *Manager) Stop() {
+	m.mu.Lock()
+	if !m.started {
+		m.mu.Unlock()
+		return
+	}
 	close(m.stopCh)
+	m.started = false
+	stopping := m.babies
+	m.babies = make(map[string]*ManagedBaby)
+	m.mu.Unlock()
 
 	if m.pushReceiver != nil {
 		m.pushReceiver.Stop()
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for uid, mb := range m.babies {
+	for uid, mb := range stopping {
 		log.Printf("[manager] stopping baby %s", uid)
 		mb.client.Stop()
 	}
+}
+
+func (m *Manager) Restart() error {
+	m.Stop()
+	return m.Start()
+}
+
+func (m *Manager) IsStarted() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.started
 }
 
 func (m *Manager) GetState(babyUID string) *State {

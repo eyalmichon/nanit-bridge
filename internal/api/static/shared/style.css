@@ -56,6 +56,17 @@ header h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; }
   cursor: pointer; transition: color 0.2s, border-color 0.2s;
 }
 .logout-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.nav-link-btn {
+  text-decoration: none;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.68rem;
+  transition: color 0.2s, border-color 0.2s;
+}
+.nav-link-btn:hover { color: var(--text); border-color: var(--text-dim); }
 .ws-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--red); transition: background 0.3s;
@@ -380,6 +391,136 @@ select.ctrl-select:focus { outline: 1px solid var(--accent); }
 }
 
 body { padding-bottom: 220px; }
+
+/* ── Settings page ──────────────────────────────────────── */
+
+.settings-wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  display: grid;
+  gap: 1rem;
+}
+
+.settings-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem 1rem 1.15rem;
+}
+
+.settings-card h2 {
+  font-size: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.settings-subtle {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-bottom: 0.9rem;
+}
+
+.settings-form {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.settings-form.hidden { display: none; }
+
+.settings-form label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 0.25rem;
+}
+
+.settings-form input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.settings-form input:focus {
+  border-color: var(--accent);
+}
+
+.primary-btn {
+  margin-top: 0.65rem;
+  padding: 0.6rem 0.85rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.primary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.form-error {
+  margin-top: 0.7rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.form-success {
+  margin-top: 0.7rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.hidden { display: none; }
+
+/* ── Nanit auth modal ───────────────────────────────────── */
+
+.auth-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 14, 0.74);
+  backdrop-filter: blur(2px);
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.auth-modal.hidden { display: none; }
+
+.auth-modal-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: 14px;
+  padding: 1rem;
+}
+
+.auth-modal-card h2 {
+  font-size: 1rem;
+  margin-bottom: 0.4rem;
+}
+
+.auth-modal-card p {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-bottom: 0.8rem;
+}
 
 @media (max-width: 540px) {
   body { padding: 0.75rem; padding-bottom: 220px; }

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nanit-bridge - setup</title>
+  <link rel="stylesheet" href="/shared/style.css">
+  <style>
+    .setup-wrap {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 1.5rem;
+    }
+    .setup-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 2rem 2rem 1.75rem;
+      width: 100%; max-width: 380px;
+    }
+    .setup-card h1 {
+      font-size: 1.2rem; font-weight: 600;
+      letter-spacing: -0.02em; margin-bottom: 0.25rem;
+    }
+    .setup-card .subtitle {
+      font-size: 0.75rem; color: var(--muted); margin-bottom: 1.5rem;
+    }
+    .setup-card label {
+      display: block; font-size: 0.72rem; font-weight: 500;
+      color: var(--text-dim); margin-bottom: 0.35rem; margin-top: 0.85rem;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .setup-card input[type="password"] {
+      width: 100%; padding: 0.55rem 0.7rem;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-sm);
+      font-size: 0.85rem; outline: none;
+      transition: border-color 0.2s;
+    }
+    .setup-card input[type="password"]:focus {
+      border-color: var(--accent);
+    }
+    .setup-btn {
+      display: block; width: 100%;
+      margin-top: 1.25rem; padding: 0.6rem;
+      background: var(--accent); color: #fff;
+      border: none; border-radius: var(--radius-sm);
+      font-size: 0.82rem; font-weight: 600;
+      cursor: pointer; transition: opacity 0.2s;
+    }
+    .setup-btn:hover { opacity: 0.9; }
+    .setup-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .setup-error {
+      margin-top: 0.75rem; padding: 0.45rem 0.6rem;
+      background: var(--red-dim); color: var(--red);
+      border-radius: var(--radius-sm);
+      font-size: 0.75rem; display: none;
+    }
+    .setup-error.show { display: block; }
+    body { padding-bottom: 0; }
+  </style>
+</head>
+<body>
+  <div class="setup-wrap">
+    <div class="setup-card">
+      <h1>nanit-bridge</h1>
+      <div class="subtitle">Create your dashboard password to finish setup.</div>
+      <form id="setupForm" autocomplete="off">
+        <label for="password">New password</label>
+        <input type="password" id="password" name="password" required autofocus>
+
+        <label for="confirm">Confirm password</label>
+        <input type="password" id="confirm" name="confirm" required>
+
+        <button type="submit" class="setup-btn" id="setupBtn">Save password</button>
+        <div class="setup-error" id="setupError">Setup failed.</div>
+      </form>
+    </div>
+  </div>
+  <script>
+    (function() {
+      var form = document.getElementById('setupForm');
+      var btn = document.getElementById('setupBtn');
+      var errEl = document.getElementById('setupError');
+      var pwInput = document.getElementById('password');
+      var confirmInput = document.getElementById('confirm');
+
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        errEl.classList.remove('show');
+
+        if (!pwInput.value || !confirmInput.value) {
+          errEl.textContent = 'Please fill both fields.';
+          errEl.classList.add('show');
+          return;
+        }
+        if (pwInput.value !== confirmInput.value) {
+          errEl.textContent = 'Passwords do not match.';
+          errEl.classList.add('show');
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+
+        fetch('/api/auth/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwInput.value, confirm: confirmInput.value })
+        }).then(function(r) {
+          if (!r.ok) return r.text().then(function(t) { throw new Error(t || 'setup failed'); });
+          window.location.href = '/login';
+        }).catch(function(err) {
+          errEl.textContent = (err && err.message) || 'Setup failed.';
+          errEl.classList.add('show');
+          btn.disabled = false;
+          btn.textContent = 'Save password';
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
