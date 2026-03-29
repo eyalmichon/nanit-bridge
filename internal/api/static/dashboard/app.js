@@ -199,12 +199,22 @@
         '<div class="video-container">' +
           '<video id="video-' + uid + '" muted autoplay playsinline></video>' +
           '<div class="video-overlay" id="overlay-' + uid + '">Stream not active</div>' +
+          '<button class="unmute-btn" id="unmute-' + uid + '" title="Unmute">&#128263;</button>' +
         '</div>' +
         '<div class="baby-body">' +
           '<div id="info-' + uid + '"></div>' +
           '<div id="controls-' + uid + '"></div>' +
         '</div>';
       babiesEl.appendChild(card);
+      var unmuteBtn = document.getElementById('unmute-' + uid);
+      unmuteBtn.onclick = function() {
+        var vid = document.getElementById('video-' + uid);
+        if (vid) {
+          vid.muted = !vid.muted;
+          this.innerHTML = vid.muted ? '&#128263;' : '&#128266;';
+          this.classList.toggle('active', !vid.muted);
+        }
+      };
       fetchNotifSettings(uid);
     }
     return card;
