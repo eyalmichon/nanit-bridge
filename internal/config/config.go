@@ -25,14 +25,20 @@ type Config struct {
 
 	SensorPollSec int
 
-	SessionFile   string
-	PushCredsFile string
-	LogLevel      string
+	SessionFile      string
+	PushCredsFile    string
+	DashboardAuthFile string
+	LogLevel         string
+}
+
+// LoadEnvFile loads .env if present without overriding existing env vars.
+// Useful for CLI subcommands that need env defaults without full config validation.
+func LoadEnvFile() error {
+	return godotenv.Load()
 }
 
 func Load() (*Config, error) {
-	// Best-effort: load .env if present, don't override existing env vars.
-	_ = godotenv.Load()
+	_ = LoadEnvFile()
 	c := &Config{
 		NanitEmail:    os.Getenv("NANIT_EMAIL"),
 		NanitPassword: os.Getenv("NANIT_PASSWORD"),
@@ -42,8 +48,9 @@ func Load() (*Config, error) {
 		MQTTPassword:  os.Getenv("NANIT_MQTT_PASSWORD"),
 		MQTTPrefix:    envOrDefault("NANIT_MQTT_PREFIX", "nanit"),
 		SessionFile:   envOrDefault("NANIT_SESSION_FILE", "/data/session.json"),
-		PushCredsFile: envOrDefault("NANIT_PUSH_CREDS_FILE", "/data/push_creds.json"),
-		LogLevel:      envOrDefault("NANIT_LOG_LEVEL", "info"),
+		PushCredsFile:    envOrDefault("NANIT_PUSH_CREDS_FILE", "/data/push_creds.json"),
+		DashboardAuthFile: envOrDefault("NANIT_DASHBOARD_AUTH_FILE", "/data/dashboard_password.hash"),
+		LogLevel:         envOrDefault("NANIT_LOG_LEVEL", "info"),
 	}
 
 	port, err := strconv.Atoi(envOrDefault("NANIT_RTMP_PORT", "1935"))

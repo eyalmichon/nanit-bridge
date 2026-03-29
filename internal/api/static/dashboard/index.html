@@ -4,15 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>nanit-bridge</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="/shared/style.css">
   <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js"></script>
 </head>
 <body>
   <header>
     <h1>nanit-bridge</h1>
-    <div class="ws-status">
-      <div class="ws-dot" id="wsDot"></div>
-      <span id="wsLabel">connecting...</span>
+    <div class="header-right">
+      <div class="ws-status">
+        <div class="ws-dot" id="wsDot"></div>
+        <span id="wsLabel">connecting...</span>
+      </div>
+      <button class="logout-btn" id="logoutBtn" title="Sign out">Sign out</button>
     </div>
   </header>
   <div id="babies">
@@ -31,6 +34,6 @@
       <pre id="logContent"></pre>
     </div>
   </div>
-  <script src="app.js"></script>
+  <script src="/dashboard/app.js"></script>
 </body>
 </html>

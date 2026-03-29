@@ -99,6 +99,7 @@ type Server struct {
 	manager    *baby.Manager
 	rtmpServer *rtmpserver.Server
 	logBcast   *LogBroadcaster
+	auth       *authManager
 
 	mu      sync.Mutex
 	clients map[*wsClient]struct{}
@@ -110,12 +111,13 @@ type wsClient struct {
 	closed bool
 }
 
-func NewServer(port int, manager *baby.Manager, rtmpServer *rtmpserver.Server, logBcast *LogBroadcaster) *Server {
+func NewServer(port int, manager *baby.Manager, rtmpServer *rtmpserver.Server, logBcast *LogBroadcaster, authFile string) *Server {
 	s := &Server{
 		port:       port,
 		manager:    manager,
 		rtmpServer: rtmpServer,
 		logBcast:   logBcast,
+		auth:       newAuthManager(authFile),
 		clients:    make(map[*wsClient]struct{}),
 	}
 
@@ -139,6 +141,8 @@ func NewServer(port int, manager *baby.Manager, rtmpServer *rtmpserver.Server, l
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/api/auth/login", s.auth.handleLogin)
+	mux.HandleFunc("/api/auth/logout", s.auth.handleLogout)
 	mux.HandleFunc("/api/babies", s.handleBabies)
 	mux.HandleFunc("/api/babies/", s.handleBabyOrControl)
 	mux.HandleFunc("/api/stream/", s.handleStreamFLV)
@@ -151,8 +155,17 @@ func (s *Server) Start() error {
 	fileServer := http.FileServer(http.FS(staticFS))
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-		fileServer.ServeHTTP(w, r)
+		switch r.URL.Path {
+		case "/", "/index.html":
+			http.ServeFileFS(w, r, staticFS, "dashboard/index.html")
+		case "/login", "/login/", "/login/index.html":
+			http.ServeFileFS(w, r, staticFS, "login/index.html")
+		default:
+			fileServer.ServeHTTP(w, r)
+		}
 	}))
+
+	handler := s.auth.authMiddleware(mux)
 
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("[api] dashboard at http://0.0.0.0%s", addr)
@@ -160,7 +173,7 @@ func (s *Server) Start() error {
 	go func() {
 		srv := &http.Server{
 			Addr:        addr,
-			Handler:     mux,
+			Handler:     handler,
 			ReadTimeout: 10 * time.Second,
 		}
 		if err := srv.ListenAndServe(); err != nil {
@@ -550,41 +563,41 @@ func (s *Server) handleStreamFLV(w http.ResponseWriter, r *http.Request) {
 func (s *Server) buildBabyJSON(uid string, state *baby.State) map[string]interface{} {
 	sensors, controls, camera, stream, wsAlive := state.Snapshot()
 	return map[string]interface{}{
-		"uid":         uid,
-		"camera_uid":  state.CameraUID,
-		"name":        state.Name,
-		"ws_alive":    wsAlive,
-		"stream":      stream.String(),
-		"rtmp_active":    s.rtmpServer.HasStream(uid),
+		"uid":             uid,
+		"camera_uid":      state.CameraUID,
+		"name":            state.Name,
+		"ws_alive":        wsAlive,
+		"stream":          stream.String(),
+		"rtmp_active":     s.rtmpServer.HasStream(uid),
 		"sensor_poll_sec": s.manager.GetSensorPollInterval(uid),
-		"push_active":    s.manager.IsPushActive(),
+		"push_active":     s.manager.IsPushActive(),
 		"sensors": map[string]interface{}{
-			"temperature":      sensors.Temperature,
-			"humidity":         sensors.Humidity,
-			"light":            sensors.Light,
-			"is_night":         sensors.IsNight,
-			"cry_detected":     sensors.CryDetected,
-			"cry_detected_at":  sensors.CryDetectedAt.Format(time.RFC3339),
-			"sound_alert":      sensors.SoundAlert,
-			"sound_alert_at":   sensors.SoundAlertAt.Format(time.RFC3339),
-			"motion_alert":     sensors.MotionAlert,
-			"motion_alert_at":  sensors.MotionAlertAt.Format(time.RFC3339),
-			"last_update":      sensors.LastUpdate.Format(time.RFC3339),
+			"temperature":     sensors.Temperature,
+			"humidity":        sensors.Humidity,
+			"light":           sensors.Light,
+			"is_night":        sensors.IsNight,
+			"cry_detected":    sensors.CryDetected,
+			"cry_detected_at": sensors.CryDetectedAt.Format(time.RFC3339),
+			"sound_alert":     sensors.SoundAlert,
+			"sound_alert_at":  sensors.SoundAlertAt.Format(time.RFC3339),
+			"motion_alert":    sensors.MotionAlert,
+			"motion_alert_at": sensors.MotionAlertAt.Format(time.RFC3339),
+			"last_update":     sensors.LastUpdate.Format(time.RFC3339),
 		},
 		"controls": map[string]interface{}{
 			"night_light":            controls.NightLight,
 			"night_light_brightness": controls.NightLightBrightness,
 			"night_light_timeout":    controls.NightLightTimeout,
 			"volume":                 controls.Volume,
-			"playback":            controls.PlaybackActive,
-			"current_track":       controls.CurrentTrack,
-			"soundtracks":         controls.Soundtracks,
-			"sound_sensitivity":   controls.SoundSensitivity,
-			"motion_sensitivity":  controls.MotionSensitivity,
-			"sleep_mode":          controls.SleepMode,
-			"night_vision":        controls.NightVision,
-			"status_light":        controls.StatusLight,
-			"mic_mute":            controls.MicMute,
+			"playback":               controls.PlaybackActive,
+			"current_track":          controls.CurrentTrack,
+			"soundtracks":            controls.Soundtracks,
+			"sound_sensitivity":      controls.SoundSensitivity,
+			"motion_sensitivity":     controls.MotionSensitivity,
+			"sleep_mode":             controls.SleepMode,
+			"night_vision":           controls.NightVision,
+			"status_light":           controls.StatusLight,
+			"mic_mute":               controls.MicMute,
 			"breathing": map[string]interface{}{
 				"active":          controls.Breathing.Active,
 				"calibrating":     controls.Breathing.Calibrating,

@@ -74,6 +74,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: action, value: value })
     }).then(function(r) {
+      if (handleAuthError(r)) return;
       if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
       return r;
     });
@@ -81,7 +82,7 @@
 
   function fetchNotifSettings(uid) {
     fetch('/api/babies/' + uid + '/notification_settings')
-      .then(function(r) { return r.json(); })
+      .then(function(r) { if (handleAuthError(r)) return; return r.json(); })
       .then(function(d) {
         notifSettings[uid] = d.settings || {};
         renderNotifToggles(uid);
@@ -760,6 +761,22 @@
     logBadge.textContent = logLineCount + ' lines';
     logBody.scrollTop = logBody.scrollHeight;
   }
+
+  // ── Auth ────────────────────────────────────────────────
+
+  function handleAuthError(r) {
+    if (r && r.status === 401) {
+      window.location.href = '/login';
+      return true;
+    }
+    return false;
+  }
+
+  document.getElementById('logoutBtn').onclick = function() {
+    fetch('/api/auth/logout', { method: 'POST' }).finally(function() {
+      window.location.href = '/login';
+    });
+  };
 
   // ── Boot ───────────────────────────────────────────────
 

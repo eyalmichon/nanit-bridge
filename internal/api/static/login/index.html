@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nanit-bridge — login</title>
+  <link rel="stylesheet" href="/shared/style.css">
+  <style>
+    .login-wrap {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 1.5rem;
+    }
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 2rem 2rem 1.75rem;
+      width: 100%; max-width: 360px;
+    }
+    .login-card h1 {
+      font-size: 1.2rem; font-weight: 600;
+      letter-spacing: -0.02em; margin-bottom: 0.25rem;
+    }
+    .login-card .subtitle {
+      font-size: 0.75rem; color: var(--muted); margin-bottom: 1.5rem;
+    }
+    .login-card label {
+      display: block; font-size: 0.72rem; font-weight: 500;
+      color: var(--text-dim); margin-bottom: 0.35rem;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .login-card input[type="password"] {
+      width: 100%; padding: 0.55rem 0.7rem;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-sm);
+      font-size: 0.85rem; outline: none;
+      transition: border-color 0.2s;
+    }
+    .login-card input[type="password"]:focus {
+      border-color: var(--accent);
+    }
+    .login-btn {
+      display: block; width: 100%;
+      margin-top: 1.25rem; padding: 0.6rem;
+      background: var(--accent); color: #fff;
+      border: none; border-radius: var(--radius-sm);
+      font-size: 0.82rem; font-weight: 600;
+      cursor: pointer; transition: opacity 0.2s;
+    }
+    .login-btn:hover { opacity: 0.9; }
+    .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .login-error {
+      margin-top: 0.75rem; padding: 0.45rem 0.6rem;
+      background: var(--red-dim); color: var(--red);
+      border-radius: var(--radius-sm);
+      font-size: 0.75rem; display: none;
+    }
+    .login-error.show { display: block; }
+    body { padding-bottom: 0; }
+  </style>
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-card">
+      <h1>nanit-bridge</h1>
+      <div class="subtitle">Enter your dashboard password to continue.</div>
+      <form id="loginForm" autocomplete="on">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
+        <button type="submit" class="login-btn" id="loginBtn">Sign in</button>
+        <div class="login-error" id="loginError">Invalid password.</div>
+      </form>
+    </div>
+  </div>
+  <script>
+    (function() {
+      var form = document.getElementById('loginForm');
+      var btn = document.getElementById('loginBtn');
+      var errEl = document.getElementById('loginError');
+      var pwInput = document.getElementById('password');
+
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        errEl.classList.remove('show');
+        btn.disabled = true;
+        btn.textContent = 'Signing in\u2026';
+
+        fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwInput.value })
+        }).then(function(r) {
+          if (r.ok) {
+            window.location.href = '/';
+          } else {
+            errEl.classList.add('show');
+            btn.disabled = false;
+            btn.textContent = 'Sign in';
+            pwInput.select();
+          }
+        }).catch(function() {
+          errEl.textContent = 'Connection error.';
+          errEl.classList.add('show');
+          btn.disabled = false;
+          btn.textContent = 'Sign in';
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

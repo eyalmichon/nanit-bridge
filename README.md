@@ -41,7 +41,30 @@ cp .env.example .env
 # Edit .env with your Nanit email, password, LAN IP, and MQTT broker
 ```
 
-### 2. Run with Docker Compose
+### 2. Set a dashboard password
+
+The web dashboard is password-protected. You must set a password before the service will start.
+
+**Local dev:**
+```bash
+go run ./cmd/nanit-bridge --reset-dashboard-password
+```
+
+**Docker:**
+```bash
+docker compose run --rm nanit-bridge --reset-dashboard-password
+```
+
+The password is stored as a bcrypt hash in `/data/dashboard_password.hash` (configurable via `NANIT_DASHBOARD_AUTH_FILE`).
+
+To reset the password later (no restart needed — the new password takes effect on the next login):
+
+```bash
+# From the host while the container is running:
+docker exec -it nanit-bridge /nanit-bridge --reset-dashboard-password
+```
+
+### 3. Run with Docker Compose
 
 ```bash
 docker compose up -d
@@ -53,11 +76,11 @@ On first run, if MFA is required, run interactively to enter the code:
 docker compose run --rm nanit-bridge
 ```
 
-### 3. Open the dashboard
+### 4. Open the dashboard
 
-Navigate to `http://NANIT_BRIDGE_IP:8080` to see the live dashboard with sensor readings, video stream, and camera controls.
+Navigate to `http://NANIT_BRIDGE_IP:8080` and sign in with the password you set in step 2.
 
-### 4. Configure Frigate
+### 5. Configure Frigate
 
 ```yaml
 go2rtc:
@@ -75,7 +98,7 @@ cameras:
             - record
 ```
 
-### 5. Sensor data in Home Assistant
+### 6. Sensor data in Home Assistant
 
 If MQTT is configured, HA auto-discovery creates entities automatically:
 - `sensor.nanit_<name>_temperature`
@@ -126,6 +149,7 @@ make run      # compile + run
 | `NANIT_MQTT_PREFIX` | No | `nanit` | MQTT topic prefix |
 | `NANIT_SESSION_FILE` | No | `/data/session.json` | Token persistence file |
 | `NANIT_PUSH_CREDS_FILE` | No | `/data/push_creds.json` | FCM credentials persistence file |
+| `NANIT_DASHBOARD_AUTH_FILE` | No | `/data/dashboard_password.hash` | Bcrypt password hash file for dashboard auth |
 | `NANIT_LOG_LEVEL` | No | `info` | Log level |
 
 *Not required after initial login if a valid session file exists.

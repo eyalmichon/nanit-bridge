@@ -21,6 +21,7 @@ services:
       NANIT_MQTT_PREFIX: "${NANIT_MQTT_PREFIX:-nanit}"
       NANIT_SESSION_FILE: "/data/session.json"
       NANIT_PUSH_CREDS_FILE: "/data/push_creds.json"
+      NANIT_DASHBOARD_AUTH_FILE: "/data/dashboard_password.hash"
       NANIT_LOG_LEVEL: "${NANIT_LOG_LEVEL:-info}"
 
 volumes:

@@ -6,8 +6,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
+
+	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/term"
 
 	"nanit-bridge/internal/api"
 	"nanit-bridge/internal/baby"
@@ -18,6 +22,13 @@ import (
 )
 
 func main() {
+	for _, arg := range os.Args[1:] {
+		if arg == "--reset-dashboard-password" {
+			resetDashboardPassword()
+			return
+		}
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	log.SetPrefix("[nanit-bridge] ")
 
@@ -27,6 +38,10 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
+	}
+
+	if _, err := os.Stat(cfg.DashboardAuthFile); os.IsNotExist(err) {
+		log.Fatalf("dashboard password not set — run: nanit-bridge --reset-dashboard-password")
 	}
 
 	tokenMgr := nanit.NewTokenManager(cfg.NanitEmail, cfg.NanitPassword, cfg.SessionFile)
@@ -65,7 +80,7 @@ func main() {
 		mgr.RestartStream(streamKey)
 	})
 
-	apiServer := api.NewServer(cfg.HTTPPort, mgr, rtmpServer, logBcast)
+	apiServer := api.NewServer(cfg.HTTPPort, mgr, rtmpServer, logBcast, cfg.DashboardAuthFile)
 
 	mgr.OnStateChange(func(babyUID string, state *baby.State) {
 		if mqttPub != nil {
@@ -141,4 +156,55 @@ func ensureAuth(tokenMgr *nanit.TokenManager, cfg *config.Config) error {
 
 	log.Println("authenticated successfully")
 	return nil
+}
+
+func resetDashboardPassword() {
+	_ = config.LoadEnvFile()
+
+	authFile := os.Getenv("NANIT_DASHBOARD_AUTH_FILE")
+	if authFile == "" {
+		authFile = "/data/dashboard_password.hash"
+	}
+
+	fmt.Print("New dashboard password: ")
+	pw1, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error reading password: %v\n", err)
+		os.Exit(1)
+	}
+	if len(pw1) == 0 {
+		fmt.Fprintln(os.Stderr, "password cannot be empty")
+		os.Exit(1)
+	}
+
+	fmt.Print("Confirm password: ")
+	pw2, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error reading password: %v\n", err)
+		os.Exit(1)
+	}
+
+	if string(pw1) != string(pw2) {
+		fmt.Fprintln(os.Stderr, "passwords do not match")
+		os.Exit(1)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword(pw1, bcrypt.DefaultCost)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bcrypt error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if dir := filepath.Dir(authFile); dir != "." {
+		os.MkdirAll(dir, 0o755)
+	}
+
+	if err := os.WriteFile(authFile, hash, 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", authFile, err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Dashboard password saved to %s\n", authFile)
 }

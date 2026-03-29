@@ -42,10 +42,20 @@ header {
 }
 header h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; }
 
+.header-right {
+  display: flex; align-items: center; gap: 1rem;
+}
 .ws-status {
   display: flex; align-items: center; gap: 0.4rem;
   font-size: 0.75rem; color: var(--muted);
 }
+.logout-btn {
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border-light); border-radius: 6px;
+  padding: 0.2rem 0.55rem; font-size: 0.68rem;
+  cursor: pointer; transition: color 0.2s, border-color 0.2s;
+}
+.logout-btn:hover { color: var(--text); border-color: var(--text-dim); }
 .ws-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--red); transition: background 0.3s;
