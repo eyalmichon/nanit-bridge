@@ -769,6 +769,23 @@
     players[uid] = player;
   }
 
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState !== 'visible') return;
+    Object.keys(players).forEach(function(uid) {
+      var video = document.getElementById('video-' + uid);
+      if (!video || !video.buffered || video.buffered.length === 0) return;
+      var bufferedEnd = video.buffered.end(video.buffered.length - 1);
+      var latency = bufferedEnd - video.currentTime;
+      if (latency > 5) {
+        destroyPlayer(uid);
+        var b = babies[uid];
+        if (b && (b.rtmp_active || b.stream === 'active')) {
+          startPlayer(uid);
+        }
+      }
+    });
+  });
+
   function destroyPlayer(uid) {
     if (players[uid]) {
       try { players[uid].pause(); players[uid].unload(); players[uid].detachMediaElement(); players[uid].destroy(); } catch(e) {}
