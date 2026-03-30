@@ -519,6 +519,8 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 				c.streamRetryMu.Lock()
 				c.streamRetrying = false
 				c.streamRetryMu.Unlock()
+			} else {
+				c.scheduleStreamRetry()
 			}
 		}
 
