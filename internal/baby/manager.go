@@ -462,7 +462,7 @@ func (m *Manager) AllStates() map[string]*State {
 	return result
 }
 
-func (m *Manager) SetRTMPToken(token string) {
+func (m *Manager) SetRTMPToken(token string) error {
 	m.mu.Lock()
 	m.rtmpToken = token
 	wasStarted := m.started
@@ -470,8 +470,9 @@ func (m *Manager) SetRTMPToken(token string) {
 
 	if wasStarted {
 		log.Printf("[manager] RTMP token changed, restarting camera connections")
-		m.Restart()
+		return m.Restart()
 	}
+	return nil
 }
 
 func (m *Manager) startBaby(b nanit.Baby) {

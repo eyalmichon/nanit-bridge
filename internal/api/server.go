@@ -695,7 +695,11 @@ func (s *Server) handleRTMPTokenRegenerate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.rtmpServer.SetToken(newToken)
-	s.manager.SetRTMPToken(newToken)
+	if err := s.manager.SetRTMPToken(newToken); err != nil {
+		log.Printf("[api] manager restart after token regeneration failed: %v", err)
+		http.Error(w, "token saved but manager restart failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	log.Printf("[api] RTMP token regenerated")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
