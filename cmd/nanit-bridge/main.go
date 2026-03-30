@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -27,6 +28,10 @@ func main() {
 	for _, arg := range os.Args[1:] {
 		if arg == "--reset-dashboard-password" {
 			resetDashboardPassword()
+			return
+		}
+		if arg == "--healthcheck" {
+			runHealthcheck()
 			return
 		}
 	}
@@ -274,4 +279,20 @@ func writeDashboardPasswordHash(authFile, password string) error {
 	}
 
 	return nil
+}
+
+func runHealthcheck() {
+	port := os.Getenv("NANIT_HTTP_PORT")
+	if port == "" {
+		port = "8080"
+	}
+	resp, err := http.Get("http://127.0.0.1:" + port + "/health")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "healthcheck failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		os.Exit(1)
+	}
 }

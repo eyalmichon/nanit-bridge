@@ -396,9 +396,8 @@ func (c *CameraClient) handleRequest(req *pb.Request) {
 	case pb.RequestType_PUT_STING_STATUS:
 		if req.GetStingStatus() != nil {
 			ss := req.GetStingStatus()
-			log.Printf("[camera:%s] STING_STATUS push: state=%v breathing=%v bpm=%d win=%v pattern=%v",
-				c.cameraUID, ss.GetState(), ss.GetBreathing(), ss.GetBreathsPerMin(),
-				ss.GetWinLocation(), ss.GetPatternLocation())
+			log.Printf("[camera:%s] STING_STATUS push: state=%v breathing=%v bpm=%d",
+				c.cameraUID, ss.GetState(), ss.GetBreathing(), ss.GetBreathsPerMin())
 			switch ss.GetState() {
 			case pb.StingStatus_RUNNING, pb.StingStatus_PAUSED, pb.StingStatus_RESUMING:
 				if ss.GetWinLocation() != nil {
@@ -456,11 +455,8 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 	case pb.RequestType_GET_STING_STATUS:
 		ss := resp.GetStingStatus()
 		if ss != nil {
-			log.Printf("[camera:%s] GET_STING_STATUS response: state=%v breathing=%v bpm=%d",
+			log.Printf("[camera:%s] GET_STING_STATUS: state=%v breathing=%v bpm=%d",
 				c.cameraUID, ss.GetState(), ss.GetBreathing(), ss.GetBreathsPerMin())
-		} else {
-			log.Printf("[camera:%s] GET_STING_STATUS response: status=%d %s (no sting_status field)",
-				c.cameraUID, resp.GetStatusCode(), resp.GetStatusMessage())
 		}
 		if c.onStingStatus != nil && ss != nil {
 			c.onStingStatus(ss)

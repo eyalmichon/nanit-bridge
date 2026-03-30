@@ -252,6 +252,11 @@ func (a *authManager) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
+		if path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		if !a.hasPasswordHash() {
 			if path == "/setup" || path == "/setup/" ||
 				strings.HasPrefix(path, "/setup/") ||

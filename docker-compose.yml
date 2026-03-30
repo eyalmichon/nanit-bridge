@@ -8,6 +8,12 @@ services:
       - "8080:8080"
     volumes:
       - nanit-data:/data
+    healthcheck:
+      test: ["CMD", "/nanit-bridge", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     environment:
       NANIT_EMAIL: "${NANIT_EMAIL}"
       NANIT_PASSWORD: "${NANIT_PASSWORD}"
@@ -22,6 +28,9 @@ services:
       NANIT_SESSION_FILE: "/data/session.json"
       NANIT_PUSH_CREDS_FILE: "/data/push_creds.json"
       NANIT_DASHBOARD_AUTH_FILE: "/data/dashboard_password.hash"
+      NANIT_DASHBOARD_PASSWORD: "${NANIT_DASHBOARD_PASSWORD:-}"
+      NANIT_RTMP_TOKEN: "${NANIT_RTMP_TOKEN:-}"
+      NANIT_RTMP_TOKEN_FILE: "/data/rtmp_token"
       NANIT_LOG_LEVEL: "${NANIT_LOG_LEVEL:-info}"
 
 volumes:

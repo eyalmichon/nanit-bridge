@@ -146,6 +146,11 @@ func (s *Server) OnPublisherDisconnect(fn func(key string)) {
 	s.onPublisherDisconnect = fn
 }
 
+// IsRunning reports whether the RTMP listener is active.
+func (s *Server) IsRunning() bool {
+	return s.lis != nil
+}
+
 // HasStream returns true if a publisher is currently broadcasting for the given key.
 func (s *Server) HasStream(key string) bool {
 	s.mu.RLock()
@@ -215,6 +220,7 @@ func (s *Server) Stop() {
 	}
 	if s.lis != nil {
 		s.lis.Close()
+		s.lis = nil
 	}
 }
 
