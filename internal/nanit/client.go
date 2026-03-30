@@ -505,11 +505,20 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 			c.streamRetrying = false
 			c.streamRetryMu.Unlock()
 			if c.onStreaming != nil {
-				started := pb.Streaming_STARTED
-				c.onStreaming(StreamingUpdate{
-					CameraUID: c.cameraUID,
-					Streaming: &pb.Streaming{Status: &started},
-				})
+				if streams := resp.GetStreaming(); len(streams) > 0 {
+					for _, s := range streams {
+						c.onStreaming(StreamingUpdate{
+							CameraUID: c.cameraUID,
+							Streaming: s,
+						})
+					}
+				} else {
+					started := pb.Streaming_STARTED
+					c.onStreaming(StreamingUpdate{
+						CameraUID: c.cameraUID,
+						Streaming: &pb.Streaming{Status: &started},
+					})
+				}
 			}
 		} else {
 			log.Printf("[camera:%s] PUT_STREAMING failed: status=%d %s",

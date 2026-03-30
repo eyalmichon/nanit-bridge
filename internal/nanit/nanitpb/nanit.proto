@@ -48,6 +48,16 @@ enum RequestType {
   PUT_TCP_REQUEST = 45;
   GET_STING_START = 46;
   GET_LOGS_URI = 47;
+  PUT_SETUP_NETWORK_AP = 48;
+  PUT_REBOOT = 49;
+  PUT_WEBRTC_SERVICE_MESSAGE = 50;
+  GET_SAFE_ZONE_ROI = 51;
+  PUT_SAFE_ZONE_ROI = 52;
+  GET_PHOTO_URI = 53;
+  PUT_HTTP_REQUEST = 54;
+  PUT_ERROR = 55;
+  PUT_STREAM_CONTROLS = 56;
+  PUT_CSR = 57;
 }
 
 enum SensorType {
@@ -66,6 +76,7 @@ message SensorData {
   optional bool is_alert = 4;
   optional int32 timestamp = 5;
   optional int32 value_milli = 6;
+  optional uint64 timestamp_real = 7;
 }
 
 message GetSensorData {
@@ -98,6 +109,8 @@ message Control {
     optional bool humidity = 4;
     optional bool light = 5;
     optional bool night = 6;
+    optional bool safe_zone = 7;
+    optional bool cry = 8;
   }
 
   optional SensorDataTransfer sensor_data_transfer = 4;
@@ -225,6 +238,7 @@ message Streaming {
   required Status status = 2;
   required string rtmp_url = 3;
   optional int32 attempts = 4;
+  optional string webrtc_url = 5;
 }
 
 message Firmware {
@@ -346,12 +360,14 @@ message Response {
 
   optional Status status = 5;
   optional Settings settings = 6;
+  repeated Streaming streaming = 7;
   repeated SensorData sensor_data = 9;
   optional Firmware firmware = 10;
   optional Playback playback = 11;
   repeated Soundtrack soundtracks = 12;
   optional Control control = 13;
   optional StingStatus sting_status = 21;
+  optional StingStart sting_start = 26;
   optional GetLogs logs_uri = 27;
 }
 
