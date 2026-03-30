@@ -132,9 +132,21 @@ func (m *Manager) Stop() {
 		m.pushReceiver.Stop()
 	}
 
+	var wg sync.WaitGroup
 	for uid, mb := range stopping {
-		log.Printf("[manager] stopping baby %s", uid)
-		mb.client.Stop()
+		wg.Add(1)
+		go func(uid string, mb *ManagedBaby) {
+			defer wg.Done()
+			log.Printf("[manager] stopping baby %s", uid)
+			mb.client.Stop()
+		}(uid, mb)
+	}
+	ch := make(chan struct{})
+	go func() { wg.Wait(); close(ch) }()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		log.Printf("[manager] stop: timed out waiting for camera clients")
 	}
 }
 

@@ -40,6 +40,7 @@ type PushNotification struct {
 
 type PushReceiver struct {
 	mu         sync.Mutex
+	wg         sync.WaitGroup
 	creds      *PushCredentials
 	credsFile  string
 	tokenMgr   *TokenManager
@@ -90,14 +91,15 @@ func (p *PushReceiver) Start() error {
 		}
 	}
 
+	p.wg.Add(1)
 	go p.listenLoop()
 	return nil
 }
 
 func (p *PushReceiver) Stop() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if !p.running {
+		p.mu.Unlock()
 		return
 	}
 	p.running = false
@@ -105,6 +107,9 @@ func (p *PushReceiver) Stop() {
 	if p.client != nil {
 		p.client.Close()
 	}
+	p.mu.Unlock()
+
+	p.wg.Wait()
 }
 
 func (p *PushReceiver) register() (*PushCredentials, error) {
@@ -200,6 +205,7 @@ func (p *PushReceiver) registerWithNanit(creds *PushCredentials) error {
 }
 
 func (p *PushReceiver) listenLoop() {
+	defer p.wg.Done()
 	for {
 		select {
 		case <-p.stopCh:

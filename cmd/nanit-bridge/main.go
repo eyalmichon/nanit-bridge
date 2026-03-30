@@ -139,6 +139,8 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 
+	go func() { <-sig; log.Println("forced exit"); os.Exit(1) }()
+
 	log.Println("shutting down...")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -146,6 +148,7 @@ func main() {
 		log.Printf("api server shutdown error: %v", err)
 	}
 	mgr.Stop()
+	rtmpServer.Stop()
 }
 
 func ensureAuth(tokenMgr *nanit.TokenManager, cfg *config.Config, interactive bool) error {
