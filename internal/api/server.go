@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -105,6 +106,7 @@ type Server struct {
 
 	mu      sync.Mutex
 	clients map[*wsClient]struct{}
+	httpSrv *http.Server
 }
 
 type wsClient struct {
@@ -256,18 +258,33 @@ func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("[api] dashboard at http://0.0.0.0%s", addr)
 
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	s.mu.Lock()
+	s.httpSrv = srv
+	s.mu.Unlock()
+
 	go func() {
-		srv := &http.Server{
-			Addr:        addr,
-			Handler:     handler,
-			ReadTimeout: 10 * time.Second,
-		}
-		if err := srv.ListenAndServe(); err != nil {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("[api] http server error: %v", err)
 		}
 	}()
 
 	return nil
+}
+
+func (s *Server) Stop(ctx context.Context) error {
+	s.mu.Lock()
+	srv := s.httpSrv
+	s.httpSrv = nil
+	s.mu.Unlock()
+	if srv == nil {
+		return nil
+	}
+	return srv.Shutdown(ctx)
 }
 
 // BroadcastState sends a state update to all connected WebSocket clients.
@@ -316,13 +333,13 @@ func (s *Server) handleBabies(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleBabyOrControl(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/babies/")
 
-	if strings.Contains(path, "/control") {
+	if strings.HasSuffix(path, "/control") {
 		uid := strings.TrimSuffix(path, "/control")
 		s.handleControl(w, r, uid)
 		return
 	}
 
-	if strings.Contains(path, "/notification_settings") {
+	if strings.HasSuffix(path, "/notification_settings") {
 		uid := strings.TrimSuffix(path, "/notification_settings")
 		s.handleNotificationSettings(w, r, uid)
 		return

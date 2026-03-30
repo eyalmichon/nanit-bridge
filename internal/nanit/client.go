@@ -20,6 +20,21 @@ var (
 	keepaliveInterval = 25 * time.Second
 	reconnectInterval = 5 * time.Second
 	staleTimeout      = 90 * time.Second
+	writeTimeout      = 5 * time.Second
+)
+
+// sleepModeIndicator is a substring the camera firmware includes in its
+// status message when the stream request is rejected because sleep mode
+// is active. If the firmware ever changes this wording, update here.
+const sleepModeIndicator = "sleeping"
+
+const (
+	playbackTimerContinuous   = int32(-1)
+	defaultSoundtrackCategory = int32(0)
+	soundLowThresholdDefault  = int32(750)
+	motionLowThresholdDefault = int32(2000)
+	sensorSampleIntervalSec   = int32(1)
+	sensorTriggerIntervalSec  = int32(0)
 )
 
 type SensorUpdate struct {
@@ -109,12 +124,18 @@ func (c *CameraClient) Start() {
 }
 
 func (c *CameraClient) Stop() {
+	select {
+	case <-c.done:
+		return
+	default:
+		close(c.done)
+	}
+
 	c.connMu.Lock()
 	if c.conn != nil {
 		c.conn.Close()
 	}
 	c.connMu.Unlock()
-	close(c.done)
 
 	ch := make(chan struct{})
 	go func() { c.wg.Wait(); close(ch) }()
@@ -123,6 +144,19 @@ func (c *CameraClient) Stop() {
 	case <-time.After(3 * time.Second):
 		log.Printf("[camera:%s] stop: timed out waiting for goroutines", c.cameraUID)
 	}
+}
+
+func (c *CameraClient) delayedAction(d time.Duration, fn func()) {
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		select {
+		case <-c.done:
+			return
+		case <-time.After(d):
+		}
+		fn()
+	}()
 }
 
 func (c *CameraClient) connectLoop() {
@@ -297,6 +331,7 @@ func (c *CameraClient) keepaliveLoop(conn *websocket.Conn, errCh chan<- error) {
 			}
 
 			c.connMu.Lock()
+			_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 			err = conn.WriteMessage(websocket.BinaryMessage, data)
 			c.connMu.Unlock()
 			if err != nil {
@@ -474,7 +509,7 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 		} else {
 			log.Printf("[camera:%s] PUT_STREAMING failed: status=%d %s",
 				c.cameraUID, resp.GetStatusCode(), resp.GetStatusMessage())
-			if strings.Contains(resp.GetStatusMessage(), "sleeping") {
+			if strings.Contains(resp.GetStatusMessage(), sleepModeIndicator) {
 				log.Printf("[camera:%s] camera is in sleep mode, stopping stream retry", c.cameraUID)
 				c.streamRetryMu.Lock()
 				c.streamRetrying = false
@@ -515,6 +550,7 @@ func (c *CameraClient) sendRequest(reqType pb.RequestType, populate func(*pb.Req
 	if c.conn == nil {
 		return fmt.Errorf("not connected")
 	}
+	_ = c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	return c.conn.WriteMessage(websocket.BinaryMessage, data)
 }
 
@@ -575,10 +611,12 @@ func (c *CameraClient) scheduleStreamRetry() {
 	c.streamRetrying = true
 	c.streamRetryMu.Unlock()
 
+	c.wg.Add(1)
 	go c.streamRetryLoop()
 }
 
 func (c *CameraClient) streamRetryLoop() {
+	defer c.wg.Done()
 	log.Printf("[camera:%s] stream unavailable, retrying every 5s...", c.cameraUID)
 
 	for attempt := 1; ; attempt++ {
@@ -684,10 +722,10 @@ func (c *CameraClient) SetPlaybackTrack(on bool, trackName string) error {
 		}
 		playback := &pb.Playback{Status: &s}
 		if on {
-			continuous := int32(-1)
+			continuous := playbackTimerContinuous
 			playback.Timer = &continuous
 			if trackName != "" {
-				cat := int32(0)
+				cat := defaultSoundtrackCategory
 				playback.Soundtracks = []*pb.Soundtrack{{
 					Category: &cat,
 					Name:     &trackName,
@@ -699,12 +737,11 @@ func (c *CameraClient) SetPlaybackTrack(on bool, trackName string) error {
 	if err != nil {
 		return err
 	}
-	go func() {
-		time.Sleep(2 * time.Second)
+	c.delayedAction(2*time.Second, func() {
 		if err := c.RequestPlayback(); err != nil {
 			log.Printf("[camera:%s] failed to query playback state: %v", c.cameraUID, err)
 		}
-	}()
+	})
 	return nil
 }
 
@@ -741,11 +778,10 @@ func (c *CameraClient) SetSleepMode(on bool) error {
 		c.onSettings(settings)
 	}
 	if err == nil && !on {
-		go func() {
-			time.Sleep(2 * time.Second)
+		c.delayedAction(2*time.Second, func() {
 			log.Printf("[camera:%s] sleep mode off — restarting stream", c.cameraUID)
 			c.startStreaming()
-		}()
+		})
 	}
 	return err
 }
@@ -787,10 +823,10 @@ func (c *CameraClient) SetSoundSensitivity(value int32) error {
 	sType := pb.SensorType_SOUND
 	useLow := true
 	useHigh := true
-	low := int32(750)
+	low := soundLowThresholdDefault
 	high := value
-	sampleSec := int32(1)
-	triggerSec := int32(0)
+	sampleSec := sensorSampleIntervalSec
+	triggerSec := sensorTriggerIntervalSec
 	settings := &pb.Settings{
 		Sensors: []*pb.Settings_SensorSettings{{
 			SensorType:         &sType,
@@ -815,10 +851,10 @@ func (c *CameraClient) SetMotionSensitivity(value int32) error {
 	sType := pb.SensorType_MOTION
 	useLow := true
 	useHigh := true
-	low := int32(2000)
+	low := motionLowThresholdDefault
 	high := value
-	sampleSec := int32(1)
-	triggerSec := int32(0)
+	sampleSec := sensorSampleIntervalSec
+	triggerSec := sensorTriggerIntervalSec
 	settings := &pb.Settings{
 		Sensors: []*pb.Settings_SensorSettings{{
 			SensorType:         &sType,

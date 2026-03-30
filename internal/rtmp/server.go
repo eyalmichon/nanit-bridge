@@ -117,6 +117,8 @@ type Server struct {
 	broadcasters          map[string]*broadcaster
 	mu                    sync.RWMutex
 	onPublisherDisconnect func(key string)
+	lis                   net.Listener
+	done                  chan struct{}
 }
 
 func NewServer(port int) *Server {
@@ -166,6 +168,9 @@ func (s *Server) Start() error {
 
 	log.Printf("[rtmp] listening on %s", addr)
 
+	s.lis = lis
+	s.done = make(chan struct{})
+
 	srv := rtmp.NewServer()
 	srv.HandleConn = func(c *rtmp.Conn, nc net.Conn) {
 		s.handleConnection(c, nc)
@@ -175,6 +180,12 @@ func (s *Server) Start() error {
 		for {
 			nc, err := lis.Accept()
 			if err != nil {
+				select {
+				case <-s.done:
+					return
+				default:
+				}
+				log.Printf("[rtmp] accept error: %v", err)
 				time.Sleep(time.Second)
 				continue
 			}
@@ -183,6 +194,15 @@ func (s *Server) Start() error {
 	}()
 
 	return nil
+}
+
+func (s *Server) Stop() {
+	if s.done != nil {
+		close(s.done)
+	}
+	if s.lis != nil {
+		s.lis.Close()
+	}
 }
 
 func parseStreamKey(path string) (string, error) {

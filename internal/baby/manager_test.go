@@ -116,3 +116,17 @@ func TestApplySensorDataNil(t *testing.T) {
 		t.Fatalf("state mutated unexpectedly: %+v", s)
 	}
 }
+
+func TestApplySensorDataClearsCryOnNonAlert(t *testing.T) {
+	s := SensorState{
+		CryDetected:   true,
+		CryDetectedAt: time.Now().Add(-2 * time.Second),
+	}
+	applySensorData(&s, &pb.SensorData{
+		SensorType: pb.SensorType_CRY.Enum(),
+		IsAlert:    boolPtr(false),
+	})
+	if s.CryDetected {
+		t.Fatalf("CryDetected = true, want false")
+	}
+}

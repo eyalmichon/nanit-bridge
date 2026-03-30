@@ -29,6 +29,7 @@ type Manager struct {
 	sensorPollSec int
 	stopCh        chan struct{}
 	pushReceiver  *nanit.PushReceiver
+	pushActive    bool
 	rtmpSub       StreamSubscriber
 	started       bool
 
@@ -100,11 +101,14 @@ func (m *Manager) Start() error {
 	if m.pushReceiver != nil {
 		if err := m.pushReceiver.Start(); err != nil {
 			log.Printf("[manager] FCM push receiver failed, falling back to REST polling: %v", err)
+			m.pushActive = false
 			go m.messagePollLoop()
 		} else {
 			log.Printf("[manager] using FCM push notifications for instant alerts")
+			m.pushActive = true
 		}
 	} else {
+		m.pushActive = false
 		go m.messagePollLoop()
 	}
 
@@ -123,6 +127,7 @@ func (m *Manager) Stop() {
 	m.babies = make(map[string]*ManagedBaby)
 	m.mu.Unlock()
 
+	m.pushActive = false
 	if m.pushReceiver != nil {
 		m.pushReceiver.Stop()
 	}
@@ -403,7 +408,7 @@ func (m *Manager) GetSensorPollInterval(babyUID string) int {
 }
 
 func (m *Manager) IsPushActive() bool {
-	return m.pushReceiver != nil
+	return m.pushActive
 }
 
 func (m *Manager) GetNotificationSettings(babyUID string) (nanit.NotificationSettings, error) {
@@ -769,6 +774,8 @@ func applySensorData(s *SensorState, sd *pb.SensorData) {
 		if sd.GetIsAlert() {
 			s.CryDetected = true
 			s.CryDetectedAt = time.Now()
+		} else if sd.IsAlert != nil {
+			s.CryDetected = false
 		}
 	}
 }

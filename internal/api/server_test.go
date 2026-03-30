@@ -1,13 +1,19 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"nanit-bridge/internal/baby"
+	"nanit-bridge/internal/nanit"
 	"nanit-bridge/internal/rtmp"
 )
 
@@ -112,5 +118,55 @@ func TestHandleControlValidationAndUnknownAction(t *testing.T) {
 	s.handleControl(wrongMethodRR, wrongMethodReq, "x")
 	if wrongMethodRR.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("wrong method status = %d, want 405", wrongMethodRR.Code)
+	}
+}
+
+func TestServerStopGracefulShutdown(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for free port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	tm := nanit.NewTokenManager("", "", filepath.Join(t.TempDir(), "session.json"))
+	mgr := baby.NewManager(tm, "127.0.0.1:1935", 30, "", nil)
+	s := NewServer(
+		port,
+		mgr,
+		rtmp.NewServer(1935),
+		NewLogBroadcaster(),
+		filepath.Join(t.TempDir(), "dashboard.hash"),
+		tm,
+		nil,
+	)
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, dialErr := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server did not start listening: %v", dialErr)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.Stop(ctx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	conn, dialErr := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	if dialErr == nil {
+		_ = conn.Close()
+		t.Fatalf("expected server listener to be closed after Stop")
 	}
 }

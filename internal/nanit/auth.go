@@ -435,14 +435,25 @@ func (tm *TokenManager) parseAuthResponseLocked(data []byte) error {
 	}
 	tm.session.ExpiresAt = time.Now().Add(ttl)
 
-	go tm.save()
+	tm.saveLocked()
 	return nil
 }
 
 func (tm *TokenManager) save() {
 	tm.mu.RLock()
-	data, err := json.MarshalIndent(tm.session, "", "  ")
+	sessionCopy := tm.session
 	tm.mu.RUnlock()
+
+	data, err := json.MarshalIndent(sessionCopy, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll(dirOf(tm.filePath), 0o700)
+	_ = os.WriteFile(tm.filePath, data, 0o600)
+}
+
+func (tm *TokenManager) saveLocked() {
+	data, err := json.MarshalIndent(tm.session, "", "  ")
 	if err != nil {
 		return
 	}

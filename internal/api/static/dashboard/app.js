@@ -8,6 +8,7 @@
   var notifSettings = {};
   var ws;
   var reconnectDelay = 1000;
+  var lastWsAuthProbeAt = 0;
   var nanitConnected = true;
 
   var nanitAuthModal = document.getElementById('nanitAuthModal');
@@ -84,6 +85,21 @@
     reconnectDelay = Math.min(reconnectDelay * 2, 10000);
   }
 
+  function probeAuthAfterWSFailure() {
+    var now = Date.now();
+    if (now - lastWsAuthProbeAt < 5000) return;
+    lastWsAuthProbeAt = now;
+
+    fetch('/api/babies', { cache: 'no-store' })
+      .then(function(r) {
+        if (handleAuthError(r)) return;
+        if (r && r.status === 503) {
+          window.location.href = '/setup';
+        }
+      })
+      .catch(function() {});
+  }
+
   function connect() {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var closing = false;
@@ -97,10 +113,19 @@
       refreshNanitStatus();
     };
     ws.onerror = function() {
-      if (!closing) { closing = true; try { ws.close(); } catch(e) {} scheduleReconnect(); }
+      if (!closing) {
+        closing = true;
+        try { ws.close(); } catch(e) {}
+        probeAuthAfterWSFailure();
+        scheduleReconnect();
+      }
     };
     ws.onclose = function() {
-      if (!closing) { closing = true; scheduleReconnect(); }
+      if (!closing) {
+        closing = true;
+        probeAuthAfterWSFailure();
+        scheduleReconnect();
+      }
     };
     ws.onmessage = function(e) {
       var msg = JSON.parse(e.data);

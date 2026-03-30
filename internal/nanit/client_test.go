@@ -276,6 +276,70 @@ func TestCameraClientWebSocketRoutingAndReconnect(t *testing.T) {
 	_ = await(t, connectCh, 3*time.Second, "reconnect callback")
 }
 
+func TestCameraClientStopCloseDoneFirst(t *testing.T) {
+	cloud := newWSCloud(t)
+	withTestAPIBase(t, cloud.srv.URL)
+	setClientTimingForTest(t, 200*time.Millisecond, 200*time.Millisecond, 3*time.Second)
+
+	tm := NewTokenManager("u@example.com", "pw", t.TempDir()+"/session.json")
+	tm.session.AccessToken = "token-1"
+	tm.session.ExpiresAt = time.Now().Add(30 * time.Minute)
+
+	client := NewCameraClient("cam-stop", "baby-stop", tm, "rtmp://127.0.0.1:1935/local/baby-stop", 3600)
+	connectCh := make(chan struct{}, 1)
+	client.OnConnect(func() { connectCh <- struct{}{} })
+
+	client.Start()
+	_ = await(t, connectCh, 3*time.Second, "connect before stop")
+
+	stopped := make(chan struct{})
+	go func() {
+		client.Stop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Stop() timed out")
+	}
+
+	select {
+	case <-client.done:
+	default:
+		t.Fatalf("done channel should be closed after Stop")
+	}
+}
+
+func TestStreamRetryLoopTrackedInWaitGroup(t *testing.T) {
+	tm := NewTokenManager("u@example.com", "pw", t.TempDir()+"/session.json")
+	tm.session.AccessToken = "token-1"
+	tm.session.ExpiresAt = time.Now().Add(30 * time.Minute)
+
+	client := NewCameraClient("cam-retry", "baby-retry", tm, "rtmp://127.0.0.1:1935/local/baby-retry", 3600)
+	client.scheduleStreamRetry()
+
+	waitDone := make(chan struct{})
+	go func() {
+		client.wg.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		t.Fatalf("waitgroup finished early; streamRetryLoop is not tracked")
+	case <-time.After(150 * time.Millisecond):
+		// Expected: retry loop is running and tracked by waitgroup.
+	}
+
+	client.Stop()
+	select {
+	case <-waitDone:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("waitgroup did not finish after Stop")
+	}
+}
+
 func int32Ptr(v int32) *int32 {
 	return &v
 }

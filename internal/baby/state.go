@@ -63,6 +63,8 @@ const (
 	StreamUnhealthy
 )
 
+const AlertTTL = 30 * time.Second
+
 func (s StreamState) String() string {
 	switch s {
 	case StreamStopped:
@@ -165,6 +167,28 @@ func (s *State) UpdateCameraInfo(fn func(*CameraInfo)) {
 
 func (s *State) Snapshot() (SensorState, ControlState, CameraInfo, StreamState, bool) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.Sensors, s.Controls, s.Camera, s.Stream, s.WSAlive
+	now := time.Now()
+	shouldClear := (s.Sensors.CryDetected && !s.Sensors.CryDetectedAt.IsZero() && now.Sub(s.Sensors.CryDetectedAt) > AlertTTL) ||
+		(s.Sensors.SoundAlert && !s.Sensors.SoundAlertAt.IsZero() && now.Sub(s.Sensors.SoundAlertAt) > AlertTTL) ||
+		(s.Sensors.MotionAlert && !s.Sensors.MotionAlertAt.IsZero() && now.Sub(s.Sensors.MotionAlertAt) > AlertTTL)
+	if !shouldClear {
+		defer s.mu.RUnlock()
+		return s.Sensors, s.Controls, s.Camera, s.Stream, s.WSAlive
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	now = time.Now()
+	if s.Sensors.CryDetected && !s.Sensors.CryDetectedAt.IsZero() && now.Sub(s.Sensors.CryDetectedAt) > AlertTTL {
+		s.Sensors.CryDetected = false
+	}
+	if s.Sensors.SoundAlert && !s.Sensors.SoundAlertAt.IsZero() && now.Sub(s.Sensors.SoundAlertAt) > AlertTTL {
+		s.Sensors.SoundAlert = false
+	}
+	if s.Sensors.MotionAlert && !s.Sensors.MotionAlertAt.IsZero() && now.Sub(s.Sensors.MotionAlertAt) > AlertTTL {
+		s.Sensors.MotionAlert = false
+	}
+	sensors, controls, camera, stream, wsAlive := s.Sensors, s.Controls, s.Camera, s.Stream, s.WSAlive
+	s.mu.Unlock()
+	return sensors, controls, camera, stream, wsAlive
 }

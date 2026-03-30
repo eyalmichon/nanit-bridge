@@ -76,6 +76,12 @@ func (p *PushReceiver) Start() error {
 
 	p.mu.Lock()
 	p.creds = creds
+	if p.running {
+		p.mu.Unlock()
+		return nil
+	}
+	p.stopCh = make(chan struct{})
+	p.running = true
 	p.mu.Unlock()
 
 	if creds.NanitDeviceID == 0 {
@@ -91,11 +97,13 @@ func (p *PushReceiver) Start() error {
 func (p *PushReceiver) Stop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.running {
-		close(p.stopCh)
-		if p.client != nil {
-			p.client.Close()
-		}
+	if !p.running {
+		return
+	}
+	p.running = false
+	close(p.stopCh)
+	if p.client != nil {
+		p.client.Close()
 	}
 }
 
@@ -192,10 +200,6 @@ func (p *PushReceiver) registerWithNanit(creds *PushCredentials) error {
 }
 
 func (p *PushReceiver) listenLoop() {
-	p.mu.Lock()
-	p.running = true
-	p.mu.Unlock()
-
 	for {
 		select {
 		case <-p.stopCh:

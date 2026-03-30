@@ -118,3 +118,27 @@ func TestStateSnapshotConcurrentAccess(t *testing.T) {
 		t.Fatalf("unexpected final volume: %d", controls.Volume)
 	}
 }
+
+func TestAlertAutoClearAfterTTL(t *testing.T) {
+	s := NewState("baby-1", "cam-1", "Ava")
+	old := time.Now().Add(-AlertTTL - time.Second)
+	s.UpdateSensors(func(ss *SensorState) {
+		ss.CryDetected = true
+		ss.CryDetectedAt = old
+		ss.SoundAlert = true
+		ss.SoundAlertAt = old
+		ss.MotionAlert = true
+		ss.MotionAlertAt = old
+	})
+
+	sensors, _, _, _, _ := s.Snapshot()
+	if sensors.CryDetected {
+		t.Fatalf("CryDetected should auto-clear after TTL")
+	}
+	if sensors.SoundAlert {
+		t.Fatalf("SoundAlert should auto-clear after TTL")
+	}
+	if sensors.MotionAlert {
+		t.Fatalf("MotionAlert should auto-clear after TTL")
+	}
+}

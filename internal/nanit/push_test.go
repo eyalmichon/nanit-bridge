@@ -92,6 +92,33 @@ func TestPushCredentialsSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPushReceiverStopBeforeListenLoopStarts(t *testing.T) {
+	p := NewPushReceiver(NewTokenManager("", "", filepath.Join(t.TempDir(), "session.json")), filepath.Join(t.TempDir(), "creds.json"))
+	p.mu.Lock()
+	p.running = true
+	p.stopCh = make(chan struct{})
+	p.mu.Unlock()
+
+	p.Stop()
+
+	select {
+	case <-p.stopCh:
+	default:
+		t.Fatalf("stopCh should be closed by Stop")
+	}
+}
+
+func TestPushReceiverDoubleStopDoesNotPanic(t *testing.T) {
+	p := NewPushReceiver(NewTokenManager("", "", filepath.Join(t.TempDir(), "session.json")), filepath.Join(t.TempDir(), "creds.json"))
+	p.mu.Lock()
+	p.running = true
+	p.stopCh = make(chan struct{})
+	p.mu.Unlock()
+
+	p.Stop()
+	p.Stop()
+}
+
 func itoa(v int64) string {
 	return strconv.FormatInt(v, 10)
 }
