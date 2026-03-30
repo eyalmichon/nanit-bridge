@@ -399,8 +399,13 @@ func (c *CameraClient) handleRequest(req *pb.Request) {
 			log.Printf("[camera:%s] STING_STATUS push: state=%v breathing=%v bpm=%d win=%v pattern=%v",
 				c.cameraUID, ss.GetState(), ss.GetBreathing(), ss.GetBreathsPerMin(),
 				ss.GetWinLocation(), ss.GetPatternLocation())
-			if ss.GetWinLocation() != nil {
-				c.lastWinLocation = ss.GetWinLocation()
+			switch ss.GetState() {
+			case pb.StingStatus_RUNNING, pb.StingStatus_PAUSED, pb.StingStatus_RESUMING:
+				if ss.GetWinLocation() != nil {
+					c.lastWinLocation = ss.GetWinLocation()
+				}
+			case pb.StingStatus_INIT_FAILED, pb.StingStatus_COMPLETED_AFTER_INIT_FAILED:
+				c.lastWinLocation = nil
 			}
 			if c.onStingStatus != nil {
 				c.onStingStatus(ss)

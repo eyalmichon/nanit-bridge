@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/textproto"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -491,20 +490,20 @@ type BmmPatternPoint struct {
 	Y int
 }
 
-type bmmPatternPoints struct {
-	X1 string `json:"x1"`
-	X2 string `json:"x2"`
-	Y1 string `json:"y1"`
-	Y2 string `json:"y2"`
+type bmmBox struct {
+	X1 float64 `json:"x1"`
+	X2 float64 `json:"x2"`
+	Y1 float64 `json:"y1"`
+	Y2 float64 `json:"y2"`
 }
 
-type bmmPatternData struct {
-	PatternPoints *bmmPatternPoints `json:"pattern_points"`
-	Score         string            `json:"score"`
+type bmmObject struct {
+	Box   bmmBox  `json:"box"`
+	Score float64 `json:"score"`
 }
 
 type bmmSessionData struct {
-	PatternObjects []bmmPatternData `json:"pattern_objects"`
+	Objects []bmmObject `json:"objects"`
 }
 
 type bmmSession struct {
@@ -518,7 +517,7 @@ type bmmSession struct {
 }
 
 type bmmPatternLocationResponse struct {
-	StingSession bmmSession `json:"sting_session"`
+	BmmSessions bmmSession `json:"bmm_sessions"`
 }
 
 // GetBmmPatternLocation uploads a camera frame to the Nanit cloud API for
@@ -579,29 +578,20 @@ func (tm *TokenManager) GetBmmPatternLocation(babyUID string, framePNG []byte, i
 		return nil, fmt.Errorf("parse bmm response: %w", err)
 	}
 
-	if !result.StingSession.Detected {
+	session := result.BmmSessions
+	if !session.Detected {
 		return nil, fmt.Errorf("baby not detected in frame")
 	}
 
-	if len(result.StingSession.Data.PatternObjects) == 0 {
-		return nil, fmt.Errorf("no pattern objects returned")
+	if len(session.Data.Objects) == 0 {
+		return nil, fmt.Errorf("no objects returned")
 	}
 
-	pp := result.StingSession.Data.PatternObjects[0].PatternPoints
-	if pp == nil {
-		return nil, fmt.Errorf("pattern points nil")
-	}
+	box := session.Data.Objects[0].Box
+	x := int((box.X1 + box.X2) / 2)
+	y := int((box.Y1 + box.Y2) / 2)
 
-	x1, err := strconv.ParseFloat(pp.X1, 64)
-	if err != nil {
-		return nil, fmt.Errorf("parse x1 %q: %w", pp.X1, err)
-	}
-	y1, err := strconv.ParseFloat(pp.Y1, 64)
-	if err != nil {
-		return nil, fmt.Errorf("parse y1 %q: %w", pp.Y1, err)
-	}
-
-	return &BmmPatternPoint{X: int(x1), Y: int(y1)}, nil
+	return &BmmPatternPoint{X: x, Y: y}, nil
 }
 
 func dirOf(path string) string {

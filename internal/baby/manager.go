@@ -213,9 +213,7 @@ func (m *Manager) detectBabyPosition(babyUID string) (*nanit.BmmPatternPoint, er
 		return nil, fmt.Errorf("baby %q not found", babyUID)
 	}
 
-	cameraUID := mb.State.CameraUID
-
-	framePNG, err := captureFrameFromStream(m.rtmpSub, cameraUID)
+	framePNG, err := captureFrameFromStream(m.rtmpSub, babyUID)
 	if err != nil {
 		return nil, fmt.Errorf("capture frame: %w", err)
 	}
