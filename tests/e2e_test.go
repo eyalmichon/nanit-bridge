@@ -32,12 +32,12 @@ func TestE2EFullFlow(t *testing.T) {
 		t.Fatalf("Login() against mock cloud failed: %v", err)
 	}
 
-	rtmp := rtmpserver.NewServer(cfg.RTMPPort)
+	rtmp := rtmpserver.NewServer(cfg.RTMPPort, cfg.RTMPToken)
 	if err := rtmp.Start(); err != nil {
 		t.Fatalf("rtmp.Start(): %v", err)
 	}
 
-	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr, cfg.SensorPollSec, "", rtmp)
+	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr, cfg.RTMPToken, cfg.SensorPollSec, "", rtmp)
 	startOrRestart := func() error {
 		if mgr.IsStarted() {
 			return mgr.Restart()
@@ -54,6 +54,8 @@ func TestE2EFullFlow(t *testing.T) {
 		cfg.DashboardAuthFile,
 		tokenMgr,
 		startOrRestart,
+		cfg.RTMPAddr,
+		cfg.RTMPTokenFile,
 	)
 	mgr.OnStateChange(func(uid string, st *baby.State) {
 		apiServer.BroadcastState(uid, st)
@@ -145,7 +147,7 @@ func TestE2EFullFlow(t *testing.T) {
 	tempMilli := int32(25100)
 	humMilli := int32(64000)
 	streamStarted := pb.Streaming_STARTED
-	rtmpURL := "rtmp://127.0.0.1:1935/local/baby-1"
+	rtmpURL := "rtmp://127.0.0.1:1935/" + cfg.RTMPToken + "/baby-1"
 	if err := mock.send(&pb.Message{
 		Type: pb.Message_REQUEST.Enum(),
 		Request: &pb.Request{

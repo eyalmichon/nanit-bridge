@@ -60,6 +60,29 @@
       <p class="form-error hidden" id="passwordError"></p>
       <p class="form-success hidden" id="passwordSuccess"></p>
     </section>
+
+    <section class="settings-card">
+      <h2>Stream Access</h2>
+      <p class="settings-subtle">RTMP token required for all stream connections (cameras, go2rtc, etc).</p>
+
+      <div class="settings-form">
+        <label for="rtmpToken">RTMP Token</label>
+        <div class="input-with-btn">
+          <input type="text" id="rtmpToken" readonly>
+          <button type="button" class="copy-btn" id="copyTokenBtn" title="Copy token">Copy</button>
+        </div>
+
+        <label>Stream URLs</label>
+        <div id="streamUrlList" class="stream-url-list">
+          <p class="settings-subtle">Loading...</p>
+        </div>
+
+        <button type="button" class="danger-btn" id="regenerateTokenBtn">Regenerate Token</button>
+      </div>
+
+      <p class="form-error hidden" id="rtmpError"></p>
+      <p class="form-success hidden" id="rtmpSuccess"></p>
+    </section>
   </main>
 
   <script src="/settings/settings.js"></script>

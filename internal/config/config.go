@@ -1,9 +1,13 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -25,11 +29,14 @@ type Config struct {
 
 	SensorPollSec int
 
-	SessionFile      string
-	PushCredsFile    string
+	SessionFile       string
+	PushCredsFile     string
 	DashboardAuthFile string
 	DashboardPassword string
 	LogLevel          string
+
+	RTMPToken     string
+	RTMPTokenFile string
 }
 
 // LoadEnvFile loads .env if present without overriding existing env vars.
@@ -77,7 +84,54 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("NANIT_RTMP_ADDR is required (your LAN IP reachable by the camera, e.g. 192.168.1.100:1935)")
 	}
 
+	c.RTMPTokenFile = envOrDefault("NANIT_RTMP_TOKEN_FILE", "/data/rtmp_token")
+
+	if envToken := os.Getenv("NANIT_RTMP_TOKEN"); envToken != "" {
+		if len(envToken) < 8 {
+			return nil, fmt.Errorf("NANIT_RTMP_TOKEN must be at least 8 characters")
+		}
+		c.RTMPToken = envToken
+	} else {
+		token, err := loadOrGenerateToken(c.RTMPTokenFile)
+		if err != nil {
+			return nil, fmt.Errorf("rtmp token: %w", err)
+		}
+		c.RTMPToken = token
+	}
+
 	return c, nil
+}
+
+func loadOrGenerateToken(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err == nil {
+		token := strings.TrimSpace(string(data))
+		if len(token) >= 8 {
+			return token, nil
+		}
+	}
+	token := GenerateRTMPToken()
+	if err := WriteRTMPToken(path, token); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func GenerateRTMPToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
+func WriteRTMPToken(filePath, token string) error {
+	if dir := filepath.Dir(filePath); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(filePath, []byte(token+"\n"), 0o600)
 }
 
 func envOrDefault(key, def string) string {

@@ -49,6 +49,8 @@ func buildTestConfig(t *testing.T, httpPort, rtmpPort int) *config.Config {
 		PushCredsFile:     filepath.Join(tmp, "push_creds.json"),
 		DashboardAuthFile: filepath.Join(tmp, "dashboard_password.hash"),
 		DashboardPassword: "",
+		RTMPToken:         "e2etoken",
+		RTMPTokenFile:     filepath.Join(tmp, "rtmp_token"),
 	}
 }
 

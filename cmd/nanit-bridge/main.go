@@ -55,7 +55,7 @@ func main() {
 		log.Printf("warning: could not load session: %v", err)
 	}
 
-	rtmpServer := rtmp.NewServer(cfg.RTMPPort)
+	rtmpServer := rtmp.NewServer(cfg.RTMPPort, cfg.RTMPToken)
 	if err := rtmpServer.Start(); err != nil {
 		log.Fatalf("rtmp server: %v", err)
 	}
@@ -75,7 +75,7 @@ func main() {
 		log.Printf("MQTT connected to %s", cfg.MQTTBrokerURL)
 	}
 
-	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr, cfg.SensorPollSec, cfg.PushCredsFile, rtmpServer)
+	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr, cfg.RTMPToken, cfg.SensorPollSec, cfg.PushCredsFile, rtmpServer)
 
 	rtmpServer.OnPublisherDisconnect(func(streamKey string) {
 		mgr.RestartStream(streamKey)
@@ -106,6 +106,8 @@ func main() {
 		cfg.DashboardAuthFile,
 		tokenMgr,
 		startOrRestartManager,
+		cfg.RTMPAddr,
+		cfg.RTMPTokenFile,
 	)
 
 	mgr.OnStateChange(func(babyUID string, state *baby.State) {
@@ -129,7 +131,7 @@ func main() {
 	}
 
 	log.Printf("nanit-bridge is running")
-	log.Printf("  RTMP: rtmp://%s/local/<baby_uid>", cfg.RTMPAddr)
+	log.Printf("  RTMP: rtmp://%s/%s/<baby_uid>", cfg.RTMPAddr, cfg.RTMPToken)
 	log.Printf("  Dashboard: http://0.0.0.0:%d", cfg.HTTPPort)
 	if cfg.MQTTBrokerURL != "" {
 		log.Printf("  MQTT: %s (prefix: %s)", cfg.MQTTBrokerURL, cfg.MQTTPrefix)

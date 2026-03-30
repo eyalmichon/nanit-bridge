@@ -486,6 +486,57 @@ body { padding-bottom: 220px; }
 
 .hidden { display: none; }
 
+/* ── Input + button combos ─────────────────────────────── */
+
+.input-with-btn {
+  display: flex; gap: 0.4rem; align-items: stretch;
+}
+.input-with-btn input { flex: 1; min-width: 0; }
+.copy-btn {
+  padding: 0.45rem 0.65rem;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s, border-color 0.2s;
+}
+.copy-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.danger-btn {
+  margin-top: 0.65rem;
+  padding: 0.6rem 0.85rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--red-dim);
+  color: var(--red);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+.danger-btn:hover { background: rgba(248,113,113,0.2); }
+.danger-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ── Stream URL list ───────────────────────────────────── */
+
+.stream-url-list {
+  display: grid; gap: 0.5rem;
+}
+.stream-url-row {
+  display: grid; gap: 0.3rem;
+}
+.stream-url-name {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.stream-url-row .input-with-btn input {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.72rem;
+}
+
 /* ── Nanit auth modal ───────────────────────────────────── */
 
 .auth-modal {

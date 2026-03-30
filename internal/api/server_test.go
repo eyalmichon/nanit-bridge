@@ -19,8 +19,8 @@ import (
 
 func newTestServer() *Server {
 	return &Server{
-		manager:    baby.NewManager(nil, "127.0.0.1:1935", 30, "", nil),
-		rtmpServer: rtmp.NewServer(1935),
+		manager:    baby.NewManager(nil, "127.0.0.1:1935", "testtoken", 30, "", nil),
+		rtmpServer: rtmp.NewServer(1935, "testtoken"),
 		logBcast:   NewLogBroadcaster(),
 		clients:    make(map[*wsClient]struct{}),
 	}
@@ -130,15 +130,17 @@ func TestServerStopGracefulShutdown(t *testing.T) {
 	_ = ln.Close()
 
 	tm := nanit.NewTokenManager("", "", filepath.Join(t.TempDir(), "session.json"))
-	mgr := baby.NewManager(tm, "127.0.0.1:1935", 30, "", nil)
+	mgr := baby.NewManager(tm, "127.0.0.1:1935", "testtoken", 30, "", nil)
 	s := NewServer(
 		port,
 		mgr,
-		rtmp.NewServer(1935),
+		rtmp.NewServer(1935, "testtoken"),
 		NewLogBroadcaster(),
 		filepath.Join(t.TempDir(), "dashboard.hash"),
 		tm,
 		nil,
+		"127.0.0.1:1935",
+		filepath.Join(t.TempDir(), "rtmp_token"),
 	)
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start: %v", err)

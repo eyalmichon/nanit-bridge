@@ -17,6 +17,7 @@ import (
 	"github.com/notedit/rtmp/format/flv"
 
 	"nanit-bridge/internal/baby"
+	"nanit-bridge/internal/config"
 	"nanit-bridge/internal/nanit"
 	rtmpserver "nanit-bridge/internal/rtmp"
 )
@@ -104,6 +105,9 @@ type Server struct {
 	auth       *authManager
 	nanitAuth  *nanitAuthManager
 
+	rtmpAddr      string
+	rtmpTokenFile string
+
 	mu      sync.Mutex
 	clients map[*wsClient]struct{}
 	httpSrv *http.Server
@@ -189,15 +193,19 @@ func NewServer(
 	authFile string,
 	tokenMgr *nanit.TokenManager,
 	onNanitAuth func() error,
+	rtmpAddr string,
+	rtmpTokenFile string,
 ) *Server {
 	s := &Server{
-		port:       port,
-		manager:    manager,
-		rtmpServer: rtmpServer,
-		logBcast:   logBcast,
-		auth:       newAuthManager(authFile),
-		nanitAuth:  newNanitAuthManager(tokenMgr, manager, onNanitAuth),
-		clients:    make(map[*wsClient]struct{}),
+		port:          port,
+		manager:       manager,
+		rtmpServer:    rtmpServer,
+		logBcast:      logBcast,
+		auth:          newAuthManager(authFile),
+		nanitAuth:     newNanitAuthManager(tokenMgr, manager, onNanitAuth),
+		clients:       make(map[*wsClient]struct{}),
+		rtmpAddr:      rtmpAddr,
+		rtmpTokenFile: rtmpTokenFile,
 	}
 
 	logBcast.addListener(func(data []byte) {
@@ -230,6 +238,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/babies", s.handleBabies)
 	mux.HandleFunc("/api/babies/", s.handleBabyOrControl)
 	mux.HandleFunc("/api/stream/", s.handleStreamFLV)
+	mux.HandleFunc("/api/rtmp/token", s.handleRTMPToken)
+	mux.HandleFunc("/api/rtmp/token/regenerate", s.handleRTMPTokenRegenerate)
 	mux.HandleFunc("/ws", s.handleWS)
 
 	staticFS, err := fs.Sub(staticFiles, "static")
@@ -659,6 +669,39 @@ func (s *Server) handleStreamFLV(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (s *Server) handleRTMPToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	token := s.rtmpServer.GetToken()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"token":        token,
+		"url_template": fmt.Sprintf("rtmp://%s/{token}/{uid}", s.rtmpAddr),
+	})
+}
+
+func (s *Server) handleRTMPTokenRegenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	newToken := config.GenerateRTMPToken()
+	if err := config.WriteRTMPToken(s.rtmpTokenFile, newToken); err != nil {
+		http.Error(w, "failed to write token: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.rtmpServer.SetToken(newToken)
+	s.manager.SetRTMPToken(newToken)
+	log.Printf("[api] RTMP token regenerated")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"token":        newToken,
+		"url_template": fmt.Sprintf("rtmp://%s/{token}/{uid}", s.rtmpAddr),
+	})
 }
 
 func (s *Server) buildBabyJSON(uid string, state *baby.State) babyJSON {

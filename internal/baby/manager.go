@@ -26,6 +26,7 @@ type Manager struct {
 	babies        map[string]*ManagedBaby
 	tokenMgr      *nanit.TokenManager
 	rtmpAddr      string
+	rtmpToken     string
 	sensorPollSec int
 	stopCh        chan struct{}
 	pushReceiver  *nanit.PushReceiver
@@ -41,11 +42,12 @@ type ManagedBaby struct {
 	client *nanit.CameraClient
 }
 
-func NewManager(tokenMgr *nanit.TokenManager, rtmpAddr string, sensorPollSec int, pushCredsFile string, rtmpSub StreamSubscriber) *Manager {
+func NewManager(tokenMgr *nanit.TokenManager, rtmpAddr string, rtmpToken string, sensorPollSec int, pushCredsFile string, rtmpSub StreamSubscriber) *Manager {
 	m := &Manager{
 		babies:        make(map[string]*ManagedBaby),
 		tokenMgr:      tokenMgr,
 		rtmpAddr:      rtmpAddr,
+		rtmpToken:     rtmpToken,
 		sensorPollSec: sensorPollSec,
 		stopCh:        make(chan struct{}),
 		rtmpSub:       rtmpSub,
@@ -460,8 +462,20 @@ func (m *Manager) AllStates() map[string]*State {
 	return result
 }
 
+func (m *Manager) SetRTMPToken(token string) {
+	m.mu.Lock()
+	m.rtmpToken = token
+	wasStarted := m.started
+	m.mu.Unlock()
+
+	if wasStarted {
+		log.Printf("[manager] RTMP token changed, restarting camera connections")
+		m.Restart()
+	}
+}
+
 func (m *Manager) startBaby(b nanit.Baby) {
-	rtmpURL := fmt.Sprintf("rtmp://%s/local/%s", m.rtmpAddr, b.UID)
+	rtmpURL := fmt.Sprintf("rtmp://%s/%s/%s", m.rtmpAddr, m.rtmpToken, b.UID)
 
 	state := NewState(b.UID, b.CameraUID, b.Name)
 	client := nanit.NewCameraClient(b.CameraUID, b.UID, m.tokenMgr, rtmpURL, m.sensorPollSec)

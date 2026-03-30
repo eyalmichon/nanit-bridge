@@ -6,35 +6,45 @@ import (
 	"github.com/notedit/rtmp/av"
 )
 
-func TestParseStreamKey(t *testing.T) {
+func TestParseStreamPath(t *testing.T) {
 	tests := []struct {
-		path    string
-		want    string
-		wantErr bool
+		path      string
+		wantToken string
+		wantKey   string
+		wantErr   bool
 	}{
-		{path: "/local/abc123", want: "abc123"},
-		{path: "abc123", want: "abc123"},
-		{path: "/abc123", want: "abc123"},
-		{path: "/local/a_b-c", want: "a_b-c"},
-		{path: "/local/abc/def", wantErr: true},
-		{path: "/local/", wantErr: true},
+		{path: "/mytoken/abc123", wantToken: "mytoken", wantKey: "abc123"},
+		{path: "mytoken/abc123", wantToken: "mytoken", wantKey: "abc123"},
+		{path: "/a1b2c3d4/a_b-c", wantToken: "a1b2c3d4", wantKey: "a_b-c"},
+		{path: "/tok-en_1/uid-2_x", wantToken: "tok-en_1", wantKey: "uid-2_x"},
+
+		// Single-segment paths must be rejected (no token)
+		{path: "abc123", wantErr: true},
+		{path: "/abc123", wantErr: true},
 		{path: "", wantErr: true},
+
+		// Extra segments rejected
+		{path: "/tok/local/abc", wantErr: true},
+		{path: "/a/b/c/d", wantErr: true},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.path, func(t *testing.T) {
-			got, err := parseStreamKey(tc.path)
+			gotToken, gotKey, err := parseStreamPath(tc.path)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("expected error for %q", tc.path)
+					t.Fatalf("expected error for %q, got token=%q key=%q", tc.path, gotToken, gotKey)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error for %q: %v", tc.path, err)
 			}
-			if got != tc.want {
-				t.Fatalf("parseStreamKey(%q) = %q, want %q", tc.path, got, tc.want)
+			if gotToken != tc.wantToken {
+				t.Fatalf("parseStreamPath(%q) token = %q, want %q", tc.path, gotToken, tc.wantToken)
+			}
+			if gotKey != tc.wantKey {
+				t.Fatalf("parseStreamPath(%q) key = %q, want %q", tc.path, gotKey, tc.wantKey)
 			}
 		})
 	}

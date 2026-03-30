@@ -2,11 +2,13 @@ package rtmp
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"log"
 	"net"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -14,7 +16,7 @@ import (
 	"github.com/notedit/rtmp/format/rtmp"
 )
 
-var pathPattern = regexp.MustCompile(`^/?(?:local/)?([a-zA-Z0-9_-]+)$`)
+var pathPattern = regexp.MustCompile(`^/?([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)$`)
 
 // broadcaster manages a single published stream and its subscribers.
 type broadcaster struct {
@@ -109,11 +111,11 @@ func (b *broadcaster) broadcast(pkt av.Packet) {
 // Server is an RTMP relay that accepts publishes from Nanit cameras
 // and serves streams to consumers (go2rtc/Frigate).
 //
-// SECURITY: This server has no authentication. Any client that can reach the
-// listen port can publish or subscribe to streams. Restrict access via firewall
-// rules, Docker network isolation, or a reverse proxy.
+// All RTMP connections must include a valid token in the path:
+//   rtmp://host:port/{token}/local/{uid}
 type Server struct {
 	port                  int
+	token                 atomic.Value
 	broadcasters          map[string]*broadcaster
 	mu                    sync.RWMutex
 	onPublisherDisconnect func(key string)
@@ -121,11 +123,22 @@ type Server struct {
 	done                  chan struct{}
 }
 
-func NewServer(port int) *Server {
-	return &Server{
+func NewServer(port int, token string) *Server {
+	s := &Server{
 		port:         port,
 		broadcasters: make(map[string]*broadcaster),
 	}
+	s.token.Store(token)
+	return s
+}
+
+func (s *Server) SetToken(token string) {
+	s.token.Store(token)
+	log.Printf("[rtmp] token updated")
+}
+
+func (s *Server) GetToken() string {
+	return s.token.Load().(string)
 }
 
 // OnPublisherDisconnect registers a callback invoked when a publisher drops.
@@ -205,18 +218,25 @@ func (s *Server) Stop() {
 	}
 }
 
-func parseStreamKey(path string) (string, error) {
+func parseStreamPath(path string) (pathToken, key string, err error) {
 	matches := pathPattern.FindStringSubmatch(path)
-	if len(matches) != 2 {
-		return "", fmt.Errorf("invalid stream path: %q", path)
+	if len(matches) != 3 {
+		return "", "", fmt.Errorf("invalid stream path: %q (expected /{token}/{uid})", path)
 	}
-	return matches[1], nil
+	return matches[1], matches[2], nil
 }
 
 func (s *Server) handleConnection(c *rtmp.Conn, nc net.Conn) {
-	key, err := parseStreamKey(c.URL.Path)
+	pathToken, key, err := parseStreamPath(c.URL.Path)
 	if err != nil {
-		log.Printf("[rtmp] %v", err)
+		log.Printf("[rtmp] rejected: %v from %s", err, nc.RemoteAddr())
+		nc.Close()
+		return
+	}
+
+	expected := s.token.Load().(string)
+	if subtle.ConstantTimeCompare([]byte(pathToken), []byte(expected)) != 1 {
+		log.Printf("[rtmp] rejected: invalid token from %s (path: %s)", nc.RemoteAddr(), c.URL.Path)
 		nc.Close()
 		return
 	}

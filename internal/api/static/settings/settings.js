@@ -170,5 +170,119 @@
     });
   };
 
+  // ── RTMP Token ──────────────────────────────────────────
+
+  var rtmpTokenInput = document.getElementById('rtmpToken');
+  var streamUrlList = document.getElementById('streamUrlList');
+  var copyTokenBtn = document.getElementById('copyTokenBtn');
+  var regenerateBtn = document.getElementById('regenerateTokenBtn');
+  var rtmpError = document.getElementById('rtmpError');
+  var rtmpSuccess = document.getElementById('rtmpSuccess');
+
+  var currentTokenData = null;
+  var currentBabies = [];
+
+  function renderStreamUrls() {
+    if (!currentTokenData) return;
+    var base = (currentTokenData.url_template || '').replace('{token}', currentTokenData.token || '');
+    rtmpTokenInput.value = currentTokenData.token || '';
+
+    if (currentBabies.length === 0) {
+      streamUrlList.innerHTML = '<p class="settings-subtle">No babies connected yet.</p>';
+      return;
+    }
+
+    streamUrlList.innerHTML = '';
+    currentBabies.forEach(function(b) {
+      var url = base.replace('{uid}', b.uid);
+      var row = document.createElement('div');
+      row.className = 'stream-url-row';
+
+      var label = document.createElement('span');
+      label.className = 'stream-url-name';
+      label.textContent = b.name || b.uid;
+      row.appendChild(label);
+
+      var urlWrap = document.createElement('div');
+      urlWrap.className = 'input-with-btn';
+
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.readOnly = true;
+      input.value = url;
+      urlWrap.appendChild(input);
+
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'copy-btn';
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', function() { copyToClipboard(url, btn); });
+      urlWrap.appendChild(btn);
+
+      row.appendChild(urlWrap);
+      streamUrlList.appendChild(row);
+    });
+  }
+
+  function loadRTMPToken() {
+    fetchJSON('/api/rtmp/token').then(function(d) {
+      currentTokenData = d;
+      renderStreamUrls();
+    }).catch(function(err) {
+      if (err.message !== 'unauthorized') {
+        showError(rtmpError, 'Failed to load RTMP token.');
+      }
+    });
+  }
+
+  function loadBabies() {
+    fetchJSON('/api/babies').then(function(d) {
+      currentBabies = (d.babies || []);
+      renderStreamUrls();
+    }).catch(function() {});
+  }
+
+  function copyToClipboard(text, btn) {
+    navigator.clipboard.writeText(text).then(function() {
+      var orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(function() { btn.textContent = orig; }, 1200);
+    });
+  }
+
+  copyTokenBtn.addEventListener('click', function() {
+    copyToClipboard(rtmpTokenInput.value, copyTokenBtn);
+  });
+
+  regenerateBtn.addEventListener('click', function() {
+    hideError(rtmpError);
+    hideSuccess(rtmpSuccess);
+
+    var ok = confirm(
+      'This will disconnect all external RTMP subscribers (e.g. go2rtc). ' +
+      'They will need to be reconfigured with the new token.\n\nContinue?'
+    );
+    if (!ok) return;
+
+    regenerateBtn.disabled = true;
+    regenerateBtn.textContent = 'Regenerating...';
+
+    fetchJSON('/api/rtmp/token/regenerate', { method: 'POST' })
+      .then(function(d) {
+        currentTokenData = d;
+        renderStreamUrls();
+        showSuccess(rtmpSuccess, 'Token regenerated. Update any external consumers with the new URLs.');
+      })
+      .catch(function(err) {
+        showError(rtmpError, err.message);
+      })
+      .finally(function() {
+        regenerateBtn.disabled = false;
+        regenerateBtn.textContent = 'Regenerate Token';
+      });
+  });
+
   refreshNanitStatus();
+  loadRTMPToken();
+  loadBabies();
 })();

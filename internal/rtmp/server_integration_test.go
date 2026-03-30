@@ -32,7 +32,8 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 
 func TestServerPublishSubscribeIntegration(t *testing.T) {
 	port := freePort(t)
-	s := NewServer(port)
+	const token = "integrationtoken"
+	s := NewServer(port, token)
 
 	disconnectCh := make(chan string, 1)
 	s.OnPublisherDisconnect(func(key string) {
@@ -51,7 +52,7 @@ func TestServerPublishSubscribeIntegration(t *testing.T) {
 		t.Fatalf("Subscribe(%q) unexpectedly succeeded before publish", streamKey)
 	}
 
-	url := "rtmp://127.0.0.1:" + itoa(port) + "/local/" + streamKey
+	url := "rtmp://127.0.0.1:" + itoa(port) + "/" + token + "/" + streamKey
 	opener := &format.URLOpener{}
 
 	// Real RTMP publisher connection.
@@ -107,6 +108,38 @@ func TestServerPublishSubscribeIntegration(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("subscriber channel did not close after publisher disconnect")
+	}
+}
+
+func TestServerRejectsWrongToken(t *testing.T) {
+	port := freePort(t)
+	s := NewServer(port, "correct-token")
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	defer s.Stop()
+
+	url := "rtmp://127.0.0.1:" + itoa(port) + "/wrong-token/mystream"
+	opener := &format.URLOpener{}
+	_, err := opener.Create(url)
+	if err == nil {
+		t.Fatalf("expected connection with wrong token to fail, but it succeeded")
+	}
+}
+
+func TestServerRejectsNoToken(t *testing.T) {
+	port := freePort(t)
+	s := NewServer(port, "correct-token")
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	defer s.Stop()
+
+	url := "rtmp://127.0.0.1:" + itoa(port) + "/mystream"
+	opener := &format.URLOpener{}
+	_, err := opener.Create(url)
+	if err == nil {
+		t.Fatalf("expected connection without token to fail, but it succeeded")
 	}
 }
 
