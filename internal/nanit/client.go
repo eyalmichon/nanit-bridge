@@ -216,11 +216,12 @@ func (c *CameraClient) connect() error {
 	}
 
 	errCh := make(chan error, 2)
+	connDone := make(chan struct{})
 
 	c.wg.Add(3)
 	go c.readLoop(conn, errCh)
 	go c.keepaliveLoop(conn, errCh)
-	go c.sensorPollLoop()
+	go c.sensorPollLoop(connDone)
 
 	if err := c.startStreaming(); err != nil {
 		log.Printf("[camera:%s] failed to start streaming: %v", c.cameraUID, err)
@@ -253,6 +254,7 @@ func (c *CameraClient) connect() error {
 	case <-c.done:
 	}
 
+	close(connDone)
 	c.stopStreaming()
 	conn.Close()
 
@@ -285,7 +287,7 @@ func (c *CameraClient) readLoop(conn *websocket.Conn, errCh chan<- error) {
 	}
 }
 
-func (c *CameraClient) sensorPollLoop() {
+func (c *CameraClient) sensorPollLoop(connDone <-chan struct{}) {
 	defer c.wg.Done()
 
 	curInterval := c.sensorPollSec.Load()
@@ -302,6 +304,8 @@ func (c *CameraClient) sensorPollLoop() {
 				curInterval = newInterval
 				ticker.Reset(time.Duration(curInterval) * time.Second)
 			}
+		case <-connDone:
+			return
 		case <-c.done:
 			return
 		}
