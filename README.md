@@ -13,7 +13,17 @@ Local bridge for Nanit baby monitors. Connects to the Nanit cloud, relays the ca
 
 ## Quick Start
 
-### Docker Compose (recommended)
+### Homelab CLI (recommended)
+
+If you're using the [proxmox-homelab](https://github.com/eyalmichon/proxmox-homelab) Docker host:
+
+```bash
+homelab install nanit-bridge
+```
+
+The CLI will prompt for your Nanit credentials, LAN IP, and optional MQTT config, then build and start the container.
+
+### Manual Docker Compose
 
 1. Clone the repo and create a `.env` file:
 
