@@ -83,6 +83,9 @@ func Load() (*Config, error) {
 	if c.RTMPAddr == "" {
 		return nil, fmt.Errorf("NANIT_RTMP_ADDR is required (your LAN IP reachable by the camera, e.g. 192.168.1.100:1935)")
 	}
+	if strings.EqualFold(c.RTMPAddr, "auto") {
+		return nil, fmt.Errorf("NANIT_RTMP_ADDR is still set to 'auto'; set it to your LAN IP (e.g. 192.168.1.100:1935)")
+	}
 
 	c.RTMPTokenFile = envOrDefault("NANIT_RTMP_TOKEN_FILE", "/data/rtmp_token")
 
