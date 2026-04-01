@@ -43,18 +43,27 @@
     nanitAuthSuccess.classList.add('hidden');
   }
 
-  function setNanitConnected(connected, email) {
+  function setNanitConnected(connected, email, mfaPending) {
     nanitConnected = !!connected;
     if (nanitConnected) {
       nanitAuthModal.classList.add('hidden');
       hideNanitError();
       hideNanitSuccess();
       nanitMfaForm.classList.add('hidden');
+      nanitLoginForm.classList.remove('hidden');
       return;
     }
-    nanitAuthHint.textContent = email
-      ? ('Nanit account (' + email + ') is disconnected. Reconnect to resume streaming and controls.')
-      : 'Reconnect your Nanit account to resume camera streaming and controls.';
+    if (mfaPending) {
+      nanitAuthHint.textContent = 'Enter the MFA code from your authenticator app to complete Nanit login.';
+      nanitLoginForm.classList.add('hidden');
+      nanitMfaForm.classList.remove('hidden');
+    } else {
+      nanitAuthHint.textContent = email
+        ? ('Nanit account (' + email + ') is disconnected. Reconnect to resume streaming and controls.')
+        : 'Reconnect your Nanit account to resume camera streaming and controls.';
+      nanitLoginForm.classList.remove('hidden');
+      nanitMfaForm.classList.add('hidden');
+    }
     nanitAuthModal.classList.remove('hidden');
   }
 
@@ -67,10 +76,14 @@
       })
       .then(function(d) {
         if (!d) return;
-        setNanitConnected(d.connected, d.email || '');
+        setNanitConnected(d.connected, d.email || '', !!d.mfa_pending);
         if (!d.connected) {
-          emptyState.querySelector('h2').textContent = 'Nanit account disconnected';
-          emptyState.querySelector('p').textContent = 'Reconnect from this modal or from /settings.';
+          emptyState.querySelector('h2').textContent = d.mfa_pending
+            ? 'MFA verification required'
+            : 'Nanit account disconnected';
+          emptyState.querySelector('p').textContent = d.mfa_pending
+            ? 'Enter your MFA code below to finish connecting.'
+            : 'Reconnect from this modal or from /settings.';
         }
       })
       .catch(function() {});

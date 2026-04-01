@@ -63,9 +63,17 @@
       if (d.connected) {
         nanitStatusText.textContent = 'Connected as ' + (d.email || 'unknown account') + '.';
         nanitLoginBtn.textContent = 'Reconnect';
+        nanitLoginForm.classList.remove('hidden');
+        nanitMfaForm.classList.add('hidden');
+      } else if (d.mfa_pending) {
+        nanitStatusText.textContent = 'MFA verification required — enter the code from your authenticator app.';
+        nanitLoginForm.classList.add('hidden');
+        nanitMfaForm.classList.remove('hidden');
       } else {
         nanitStatusText.textContent = 'Not connected to Nanit cloud.';
         nanitLoginBtn.textContent = 'Connect';
+        nanitLoginForm.classList.remove('hidden');
+        nanitMfaForm.classList.add('hidden');
       }
     }).catch(function(err) {
       if (err.message !== 'unauthorized') {

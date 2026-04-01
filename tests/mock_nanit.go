@@ -20,11 +20,12 @@ type mockNanitCloud struct {
 	srv      *httptest.Server
 	upgrader websocket.Upgrader
 
-	mu       sync.Mutex
-	conns    []*websocket.Conn
-	recvCh   chan *pb.Message
-	babyUID  string
-	cameraUID string
+	mu         sync.Mutex
+	conns      []*websocket.Conn
+	recvCh     chan *pb.Message
+	babyUID    string
+	cameraUID  string
+	mfaEnabled bool
 }
 
 // testingT is the subset used by this helper.
@@ -57,11 +58,7 @@ func (m *mockNanitCloud) URL() string {
 func (m *mockNanitCloud) handle(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodPost && r.URL.Path == "/login":
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"access_token":  "mock-access",
-			"refresh_token": "mock-refresh",
-			"expires_in":    3600,
-		})
+		m.handleLogin(w, r)
 		return
 	case r.Method == http.MethodPost && r.URL.Path == "/tokens/refresh":
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -95,6 +92,32 @@ func (m *mockNanitCloud) handle(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+}
+
+func (m *mockNanitCloud) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var body map[string]string
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	if m.mfaEnabled {
+		if body["mfa_token"] != "" && body["mfa_code"] != "" {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"access_token":  "mock-access",
+				"refresh_token": "mock-refresh",
+				"expires_in":    3600,
+			})
+			return
+		}
+		writeJSON(w, 482, map[string]interface{}{
+			"mfa_token": "mock-mfa-token",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"access_token":  "mock-access",
+		"refresh_token": "mock-refresh",
+		"expires_in":    3600,
+	})
 }
 
 func (m *mockNanitCloud) handleWS(w http.ResponseWriter, r *http.Request) {

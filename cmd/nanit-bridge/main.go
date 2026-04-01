@@ -126,9 +126,9 @@ func main() {
 		log.Fatalf("api server: %v", err)
 	}
 
-	if err := ensureAuth(tokenMgr, cfg, term.IsTerminal(int(syscall.Stdin))); err != nil {
+	if err := ensureAuth(tokenMgr, cfg, term.IsTerminal(int(syscall.Stdin)), apiServer.SetPendingMFA); err != nil {
 		log.Printf("nanit cloud auth pending: %v", err)
-		log.Printf("dashboard is available; connect via /settings or the dashboard auth modal")
+		log.Printf("open the dashboard at http://0.0.0.0:%d to complete authentication", cfg.HTTPPort)
 	} else {
 		if err := startOrRestartManager(); err != nil {
 			log.Printf("nanit authenticated but manager start failed: %v", err)
@@ -158,8 +158,7 @@ func main() {
 	rtmpServer.Stop()
 }
 
-func ensureAuth(tokenMgr *nanit.TokenManager, cfg *config.Config, interactive bool) error {
-	// Try refreshing existing session.
+func ensureAuth(tokenMgr *nanit.TokenManager, cfg *config.Config, interactive bool, setMFA func(string)) error {
 	session := tokenMgr.GetSession()
 	if session.RefreshToken != "" {
 		_, err := tokenMgr.GetAccessToken()
@@ -204,6 +203,10 @@ func ensureAuth(tokenMgr *nanit.TokenManager, cfg *config.Config, interactive bo
 	}
 
 	if mfaToken != "" {
+		if !interactive {
+			setMFA(mfaToken)
+			return fmt.Errorf("MFA required — enter code on dashboard")
+		}
 		fmt.Print("Enter MFA code from your phone: ")
 		reader := bufio.NewReader(os.Stdin)
 		code, err := reader.ReadString('\n')

@@ -288,3 +288,103 @@ func waitForBabyState(t *testing.T, client *http.Client, url string, cond func(m
 }
 
 func int32Ptr(v int32) *int32 { return &v }
+
+func TestE2EMFAHandoffFlow(t *testing.T) {
+	mock := newMockNanitCloud(t)
+	mock.mfaEnabled = true
+	restoreAPIBase := nanit.SetAPIBaseForTest(mock.URL())
+	t.Cleanup(restoreAPIBase)
+
+	httpPort := freePort(t)
+	rtmpPort := freePort(t)
+	cfg := buildTestConfig(t, httpPort, rtmpPort)
+
+	tokenMgr := nanit.NewTokenManager(cfg.NanitEmail, cfg.NanitPassword, cfg.SessionFile)
+
+	rtmp := rtmpserver.NewServer(cfg.RTMPPort, cfg.RTMPToken)
+	if err := rtmp.Start(); err != nil {
+		t.Fatalf("rtmp.Start(): %v", err)
+	}
+	t.Cleanup(rtmp.Stop)
+
+	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr, cfg.RTMPToken, cfg.SensorPollSec, "", rtmp)
+	startOrRestart := func() error {
+		if mgr.IsStarted() {
+			return mgr.Restart()
+		}
+		return mgr.Start()
+	}
+
+	logBcast := api.NewLogBroadcaster()
+	apiServer := api.NewServer(
+		cfg.HTTPPort,
+		mgr,
+		rtmp,
+		logBcast,
+		cfg.DashboardAuthFile,
+		tokenMgr,
+		startOrRestart,
+		cfg.RTMPAddr,
+		cfg.RTMPTokenFile,
+	)
+	if err := apiServer.Start(); err != nil {
+		t.Fatalf("api.Start(): %v", err)
+	}
+
+	baseURL := "http://127.0.0.1:" + itoa(httpPort)
+	waitForHTTP(t, baseURL+"/login", 3*time.Second)
+
+	// Simulate ensureAuth in non-interactive mode: Login() returns MFA token,
+	// hand it off to the API server instead of blocking on stdin.
+	mfaToken, err := tokenMgr.Login()
+	if err != nil {
+		t.Fatalf("Login() should succeed with MFA token: %v", err)
+	}
+	if mfaToken == "" {
+		t.Fatalf("expected non-empty MFA token from mock cloud")
+	}
+	apiServer.SetPendingMFA(mfaToken)
+
+	// Manager should NOT be started yet.
+	if mgr.IsStarted() {
+		t.Fatalf("manager should not be started before MFA completion")
+	}
+
+	// Auth as dashboard user.
+	client := newAuthedHTTPClient(t, baseURL)
+
+	// Verify /api/nanit/status reports mfa_pending.
+	var status map[string]interface{}
+	doJSON(t, client, http.MethodGet, baseURL+"/api/nanit/status", nil, http.StatusOK, &status)
+	if status["mfa_pending"] != true {
+		t.Fatalf("expected mfa_pending=true, got %v", status["mfa_pending"])
+	}
+	if status["connected"] != false {
+		t.Fatalf("expected connected=false, got %v", status["connected"])
+	}
+
+	// Submit MFA code via dashboard endpoint.
+	var mfaResp map[string]string
+	doJSON(t, client, http.MethodPost, baseURL+"/api/nanit/mfa",
+		map[string]string{"code": "123456"}, http.StatusOK, &mfaResp)
+	if mfaResp["status"] != "ok" {
+		t.Fatalf("MFA response status = %q, want ok", mfaResp["status"])
+	}
+
+	// Manager should now be started.
+	if !mgr.IsStarted() {
+		t.Fatalf("manager should be started after MFA completion")
+	}
+
+	// Verify status shows connected and no pending MFA.
+	var status2 map[string]interface{}
+	doJSON(t, client, http.MethodGet, baseURL+"/api/nanit/status", nil, http.StatusOK, &status2)
+	if status2["connected"] != true {
+		t.Fatalf("expected connected=true after MFA, got %v", status2["connected"])
+	}
+	if status2["mfa_pending"] == true {
+		t.Fatalf("expected mfa_pending=false after MFA completion")
+	}
+
+	t.Cleanup(mgr.Stop)
+}

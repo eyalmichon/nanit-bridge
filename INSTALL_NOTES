@@ -1,0 +1,6 @@
+Open http://<LAN_IP>:8080 to complete setup.
+
+  1. Set a dashboard password (first time only).
+  2. If MFA is enabled on your Nanit account, enter the code
+     from your authenticator app — no need to re-enter email/password.
+  3. Once authenticated, stream URLs appear on the Settings page.

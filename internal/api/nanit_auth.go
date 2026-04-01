@@ -27,17 +27,28 @@ func newNanitAuthManager(tokenMgr *nanit.TokenManager, manager *baby.Manager, on
 	}
 }
 
+func (n *nanitAuthManager) SetPendingMFA(token string) {
+	n.mu.Lock()
+	n.pendingMFATo = token
+	n.mu.Unlock()
+}
+
 func (n *nanitAuthManager) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	n.mu.Lock()
+	mfaPending := n.pendingMFATo != ""
+	n.mu.Unlock()
+
 	session := n.tokenMgr.GetSession()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"connected": n.manager.IsStarted(),
-		"email":     session.Email,
+		"connected":   n.manager.IsStarted(),
+		"email":       session.Email,
+		"mfa_pending": mfaPending,
 	})
 }
 

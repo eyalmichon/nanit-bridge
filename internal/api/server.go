@@ -297,6 +297,12 @@ func (s *Server) Stop(ctx context.Context) error {
 	return srv.Shutdown(ctx)
 }
 
+// SetPendingMFA stores an MFA token so the dashboard can complete the challenge
+// without the user re-entering credentials.
+func (s *Server) SetPendingMFA(token string) {
+	s.nanitAuth.SetPendingMFA(token)
+}
+
 // BroadcastState sends a state update to all connected WebSocket clients.
 func (s *Server) BroadcastState(babyUID string, state *baby.State) {
 	msg := s.buildBabyJSON(babyUID, state)
