@@ -1,6 +1,7 @@
 {
   "name": "nanit-bridge",
   "image": "golang:1.25-bookworm",
+  "runArgs": ["--name", "nanit-bridge", "--hostname", "nanit-bridge"],
   "forwardPorts": [1935, 8080],
   "portsAttributes": {
     "1935": {
