@@ -56,6 +56,7 @@ func TestE2EFullFlow(t *testing.T) {
 		startOrRestart,
 		cfg.RTMPAddr,
 		cfg.RTMPTokenFile,
+		"test",
 	)
 	mgr.OnStateChange(func(uid string, st *baby.State) {
 		apiServer.BroadcastState(uid, st)
@@ -326,6 +327,7 @@ func TestE2EMFAHandoffFlow(t *testing.T) {
 		startOrRestart,
 		cfg.RTMPAddr,
 		cfg.RTMPTokenFile,
+		"test",
 	)
 	if err := apiServer.Start(); err != nil {
 		t.Fatalf("api.Start(): %v", err)

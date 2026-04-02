@@ -1,6 +1,9 @@
 services:
   nanit-bridge:
-    build: .
+    build:
+      context: .
+      args:
+        VERSION: "${VERSION:-dev}"
     container_name: nanit-bridge
     restart: unless-stopped
     ports:

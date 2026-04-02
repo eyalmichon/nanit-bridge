@@ -290,6 +290,10 @@
       });
   });
 
+  fetch('/api/version').then(function(r) { return r.json(); }).then(function(d) {
+    document.getElementById('versionFooter').textContent = 'nanit-bridge ' + (d.version || '');
+  }).catch(function() {});
+
   refreshNanitStatus();
   loadRTMPToken();
   loadBabies();

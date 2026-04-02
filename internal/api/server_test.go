@@ -141,6 +141,7 @@ func TestServerStopGracefulShutdown(t *testing.T) {
 		nil,
 		"127.0.0.1:1935",
 		filepath.Join(t.TempDir(), "rtmp_token"),
+		"test",
 	)
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start: %v", err)

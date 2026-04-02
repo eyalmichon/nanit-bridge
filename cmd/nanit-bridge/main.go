@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -24,16 +26,32 @@ import (
 	"nanit-bridge/internal/rtmp"
 )
 
+var version string
+
+var (
+	flagVersion  = flag.Bool("version", false, "print version and exit")
+	flagHealth   = flag.Bool("healthcheck", false, "run Docker healthcheck and exit")
+	flagResetPW  = flag.Bool("reset-dashboard-password", false, "interactively reset the dashboard password")
+)
+
 func main() {
-	for _, arg := range os.Args[1:] {
-		if arg == "--reset-dashboard-password" {
-			resetDashboardPassword()
-			return
-		}
-		if arg == "--healthcheck" {
-			runHealthcheck()
-			return
-		}
+	flag.Parse()
+
+	if version == "" {
+		version = vcsVersion()
+	}
+
+	if *flagVersion {
+		fmt.Println("nanit-bridge " + version)
+		return
+	}
+	if *flagHealth {
+		runHealthcheck()
+		return
+	}
+	if *flagResetPW {
+		resetDashboardPassword()
+		return
 	}
 
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
@@ -113,6 +131,7 @@ func main() {
 		startOrRestartManager,
 		cfg.RTMPAddr,
 		cfg.RTMPTokenFile,
+		version,
 	)
 
 	mgr.OnStateChange(func(babyUID string, state *baby.State) {
@@ -298,4 +317,29 @@ func runHealthcheck() {
 	if resp.StatusCode != http.StatusOK {
 		os.Exit(1)
 	}
+}
+
+func vcsVersion() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+	var rev, dirty string
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			if s.Value == "true" {
+				dirty = "-dirty"
+			}
+		}
+	}
+	if rev == "" {
+		return "dev"
+	}
+	if len(rev) > 8 {
+		rev = rev[:8]
+	}
+	return rev + dirty
 }

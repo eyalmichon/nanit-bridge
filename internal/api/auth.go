@@ -252,7 +252,7 @@ func (a *authManager) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		if path == "/health" {
+		if path == "/health" || path == "/api/version" {
 			next.ServeHTTP(w, r)
 			return
 		}

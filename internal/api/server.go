@@ -99,6 +99,7 @@ func (lb *LogBroadcaster) snapshot() []string {
 
 type Server struct {
 	port       int
+	version    string
 	manager    *baby.Manager
 	rtmpServer *rtmpserver.Server
 	logBcast   *LogBroadcaster
@@ -195,9 +196,11 @@ func NewServer(
 	onNanitAuth func() error,
 	rtmpAddr string,
 	rtmpTokenFile string,
+	version string,
 ) *Server {
 	s := &Server{
 		port:          port,
+		version:       version,
 		manager:       manager,
 		rtmpServer:    rtmpServer,
 		logBcast:      logBcast,
@@ -228,6 +231,8 @@ func NewServer(
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/api/version", s.handleVersion)
 	mux.HandleFunc("/api/auth/setup", s.auth.handleSetup)
 	mux.HandleFunc("/api/auth/login", s.auth.handleLogin)
 	mux.HandleFunc("/api/auth/change-password", s.auth.handleChangePassword)
@@ -295,6 +300,19 @@ func (s *Server) Stop(ctx context.Context) error {
 		return nil
 	}
 	return srv.Shutdown(ctx)
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "ok",
+		"version": s.version,
+	})
+}
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"version": s.version})
 }
 
 // SetPendingMFA stores an MFA token so the dashboard can complete the challenge
