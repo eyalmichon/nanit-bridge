@@ -29,9 +29,9 @@ import (
 var version string
 
 var (
-	flagVersion  = flag.Bool("version", false, "print version and exit")
-	flagHealth   = flag.Bool("healthcheck", false, "run Docker healthcheck and exit")
-	flagResetPW  = flag.Bool("reset-dashboard-password", false, "interactively reset the dashboard password")
+	flagVersion = flag.Bool("version", false, "print version and exit")
+	flagHealth  = flag.Bool("healthcheck", false, "run Docker healthcheck and exit")
+	flagResetPW = flag.Bool("reset-dashboard-password", false, "interactively reset the dashboard password")
 )
 
 func main() {

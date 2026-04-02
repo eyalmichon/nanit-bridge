@@ -608,14 +608,14 @@ func (c *CameraClient) stopStreaming() {
 }
 
 // RestartStreaming re-requests the video stream from the camera.
-// It sends an immediate request, then enters the retry loop which keeps
-// retrying until the camera confirms the stream is active.
+// The PUT_STREAMING response handler schedules the retry loop on failure,
+// so we only need to send the initial request here.
 func (c *CameraClient) RestartStreaming() {
 	log.Printf("[camera:%s] re-requesting stream", c.cameraUID)
 	if err := c.startStreaming(); err != nil {
 		log.Printf("[camera:%s] stream re-request failed: %v", c.cameraUID, err)
+		c.scheduleStreamRetry()
 	}
-	c.scheduleStreamRetry()
 }
 
 func (c *CameraClient) scheduleStreamRetry() {
@@ -679,7 +679,10 @@ func (c *CameraClient) requestSensorData() error {
 }
 
 func (c *CameraClient) RequestSettings() error {
-	return c.sendRequest(pb.RequestType_GET_SETTINGS, nil)
+	return c.sendRequest(pb.RequestType_GET_SETTINGS, func(req *pb.Request) {
+		all := true
+		req.GetSettings_ = &pb.GetSettings{All: &all}
+	})
 }
 
 func (c *CameraClient) RequestControl() error {

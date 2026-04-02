@@ -94,6 +94,10 @@ message GetControl {
   optional bool sensor_data_transfer_en = 4;
 }
 
+message GetSettings {
+  optional bool all = 1;
+}
+
 message Control {
   enum NightLight {
     LIGHT_OFF = 0;
@@ -339,6 +343,7 @@ message Request {
 
   optional Streaming streaming = 4;
   optional Settings settings = 5;
+  optional GetSettings get_settings = 6;
   optional Status status = 7;
   optional GetStatus get_status = 8;
   optional GetSensorData get_sensor_data = 12;
