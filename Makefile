@@ -1,4 +1,6 @@
-.PHONY: setup generate build run run-debug clean
+.PHONY: setup generate build run run-debug clean docker
+
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 setup: generate
 	go mod tidy
@@ -10,7 +12,7 @@ generate:
 		internal/nanit/nanitpb/nanit.proto
 
 build:
-	go build -o bin/nanit-bridge ./cmd/nanit-bridge
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/nanit-bridge ./cmd/nanit-bridge
 
 debug:
 	go build -o bin/nanit-debug ./cmd/nanit-debug
@@ -25,4 +27,4 @@ clean:
 	rm -rf bin/
 
 docker:
-	docker build -t nanit-bridge .
+	docker build --build-arg VERSION=$(VERSION) -t nanit-bridge .
