@@ -168,7 +168,7 @@ type controlJSON struct {
 	SoundSensitivity     int                   `json:"sound_sensitivity"`
 	MotionSensitivity    int                   `json:"motion_sensitivity"`
 	SleepMode            bool                  `json:"sleep_mode"`
-	NightVision          bool                  `json:"night_vision"`
+	NightVision          int                   `json:"night_vision"`
 	StatusLight          bool                  `json:"status_light"`
 	MicMute              bool                  `json:"mic_mute"`
 	Breathing            breathingControlJSON  `json:"breathing"`
@@ -504,12 +504,17 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, uid strin
 		err = s.manager.SetSleepMode(uid, on)
 
 	case "night_vision":
-		on, ok := body.Value.(bool)
+		f, ok := body.Value.(float64)
 		if !ok {
-			http.Error(w, "value must be boolean", http.StatusBadRequest)
+			http.Error(w, "value must be number (0=off, 1=auto, 2=on)", http.StatusBadRequest)
 			return
 		}
-		err = s.manager.SetNightVision(uid, on)
+		mode := int32(f)
+		if mode < 0 || mode > 2 {
+			http.Error(w, "value must be 0, 1, or 2", http.StatusBadRequest)
+			return
+		}
+		err = s.manager.SetNightVision(uid, mode)
 
 	case "status_light":
 		on, ok := body.Value.(bool)
@@ -767,7 +772,7 @@ func (s *Server) buildBabyJSON(uid string, state *baby.State) babyJSON {
 			SoundSensitivity:     controls.SoundSensitivity,
 			MotionSensitivity:    controls.MotionSensitivity,
 			SleepMode:            controls.SleepMode,
-			NightVision:          controls.NightVision,
+			NightVision:          int(controls.NightVision),
 			StatusLight:          controls.StatusLight,
 			MicMute:              controls.MicMute,
 			Breathing: breathingControlJSON{

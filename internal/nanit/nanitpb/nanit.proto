@@ -135,7 +135,12 @@ enum MountingMode {
 }
 
 message Settings {
-  optional bool night_vision = 2;
+  enum NightVision {
+    NV_OFF = 0;
+    NV_AUTOMATIC = 1;
+    NV_ON = 2;
+  }
+  optional NightVision night_vision = 2;
 
   message SensorSettings {
     required SensorType sensor_type = 1;

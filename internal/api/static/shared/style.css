@@ -263,6 +263,29 @@ header h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; }
 .toggle.pending { opacity: 0.5; animation: pulse 1s ease-in-out infinite; pointer-events: none; }
 @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
 
+/* ── Segmented control ──────────────────────────────────── */
+
+.seg-ctrl {
+  display: inline-flex;
+  background: var(--border-light);
+  border-radius: 9px;
+  padding: 2px;
+  gap: 2px;
+}
+.seg-btn {
+  border: none; background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.7rem; font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.seg-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
 /* ── Range slider ───────────────────────────────────────── */
 
 input[type="range"] {

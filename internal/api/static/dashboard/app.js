@@ -356,7 +356,7 @@
     var pbOn = getControlValue(uid, 'playback', c.playback);
     var vol = getControlValue(uid, 'volume', c.volume || 0);
     var sleepMode = c.sleep_mode || false;
-    var nightVision = c.night_vision || false;
+    var nightVision = c.night_vision || 0;
     var statusLight = c.status_light || false;
     var micMute = c.mic_mute || false;
     var br = c.breathing || {};
@@ -542,7 +542,11 @@
           '</div>' +
           '<div class="ctrl-row">' +
             '<span class="ctrl-label">Night Vision</span>' +
-            '<button class="toggle ' + (d.nightVision ? 'on' : '') + '" id="ctrl-nightvision-' + uid + '"></button>' +
+            '<div class="seg-ctrl" id="ctrl-nightvision-' + uid + '">' +
+              '<button class="seg-btn' + (d.nightVision === 0 ? ' active' : '') + '" data-val="0">Off</button>' +
+              '<button class="seg-btn' + (d.nightVision === 1 ? ' active' : '') + '" data-val="1">Auto</button>' +
+              '<button class="seg-btn' + (d.nightVision === 2 ? ' active' : '') + '" data-val="2">On</button>' +
+            '</div>' +
           '</div>' +
           '<div class="ctrl-row">' +
             '<span class="ctrl-label">Status LED</span>' +
@@ -652,12 +656,17 @@
       sendControl(uid, 'sleep_mode', newVal);
     };
 
-    var nvBtn = document.getElementById('ctrl-nightvision-' + uid);
-    if (nvBtn) nvBtn.onclick = function() {
-      var newVal = !this.classList.contains('on');
-      this.classList.toggle('on', newVal);
-      sendControl(uid, 'night_vision', newVal);
-    };
+    var nvCtrl = document.getElementById('ctrl-nightvision-' + uid);
+    if (nvCtrl) {
+      var nvBtns = nvCtrl.querySelectorAll('.seg-btn');
+      nvBtns.forEach(function(btn) {
+        btn.onclick = function() {
+          nvBtns.forEach(function(b) { b.classList.remove('active'); });
+          this.classList.add('active');
+          sendControl(uid, 'night_vision', parseInt(this.getAttribute('data-val'), 10));
+        };
+      });
+    }
 
     var slBtn = document.getElementById('ctrl-statuslight-' + uid);
     if (slBtn) slBtn.onclick = function() {
@@ -723,7 +732,12 @@
     if (sleepHintSync) sleepHintSync.textContent = d.sleepMode ? 'Camera is off' : 'Camera is on';
 
     var nvSync = document.getElementById('ctrl-nightvision-' + uid);
-    if (nvSync) nvSync.classList.toggle('on', d.nightVision);
+    if (nvSync) {
+      var nvSyncBtns = nvSync.querySelectorAll('.seg-btn');
+      nvSyncBtns.forEach(function(b) {
+        b.classList.toggle('active', parseInt(b.getAttribute('data-val'), 10) === d.nightVision);
+      });
+    }
     var slSync = document.getElementById('ctrl-statuslight-' + uid);
     if (slSync) slSync.classList.toggle('on', d.statusLight);
     var mmSync = document.getElementById('ctrl-micmute-' + uid);

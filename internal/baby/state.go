@@ -49,7 +49,7 @@ type ControlState struct {
 	MotionSensitivity    int
 	Breathing            BreathingState
 	SleepMode            bool
-	NightVision          bool
+	NightVision          int32
 	StatusLight          bool
 	MicMute              bool
 }

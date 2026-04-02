@@ -805,8 +805,9 @@ func (c *CameraClient) SetSleepMode(on bool) error {
 	return err
 }
 
-func (c *CameraClient) SetNightVision(on bool) error {
-	settings := &pb.Settings{NightVision: &on}
+func (c *CameraClient) SetNightVision(mode int32) error {
+	nv := pb.Settings_NightVision(mode)
+	settings := &pb.Settings{NightVision: &nv}
 	err := c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
 		req.Settings = settings
 	})

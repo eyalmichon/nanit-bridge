@@ -345,14 +345,14 @@ func (m *Manager) SetSleepMode(babyUID string, on bool) error {
 	return mb.client.SetSleepMode(on)
 }
 
-func (m *Manager) SetNightVision(babyUID string, on bool) error {
+func (m *Manager) SetNightVision(babyUID string, mode int32) error {
 	m.mu.Lock()
 	mb, ok := m.babies[babyUID]
 	m.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("baby %q not found", babyUID)
 	}
-	return mb.client.SetNightVision(on)
+	return mb.client.SetNightVision(mode)
 }
 
 func (m *Manager) SetStatusLight(babyUID string, on bool) error {
@@ -562,7 +562,7 @@ func (m *Manager) startBaby(b nanit.Baby) {
 				c.SleepMode = settings.GetSleepMode()
 			}
 			if settings.NightVision != nil {
-				c.NightVision = settings.GetNightVision()
+				c.NightVision = int32(settings.GetNightVision())
 			}
 			if settings.StatusLightOn != nil {
 				c.StatusLight = settings.GetStatusLightOn()
