@@ -132,6 +132,12 @@ func (s *State) SetStreamState(st StreamState) {
 	}
 }
 
+func (s *State) IsWSAlive() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.WSAlive
+}
+
 func (s *State) SetWSAlive(alive bool) {
 	s.mu.Lock()
 	s.WSAlive = alive

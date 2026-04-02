@@ -19,6 +19,7 @@ import (
 // StreamSubscriber provides read access to live RTMP streams.
 type StreamSubscriber interface {
 	Subscribe(key string) (packets <-chan av.Packet, unsubscribe func(), ok bool)
+	HasStream(key string) bool
 }
 
 type Manager struct {
@@ -34,6 +35,8 @@ type Manager struct {
 	rtmpSub       StreamSubscriber
 	started       bool
 
+	lastStreamRestart map[string]time.Time
+
 	onStateChange func(babyUID string, state *State)
 }
 
@@ -44,13 +47,14 @@ type ManagedBaby struct {
 
 func NewManager(tokenMgr *nanit.TokenManager, rtmpAddr string, rtmpToken string, sensorPollSec int, pushCredsFile string, rtmpSub StreamSubscriber) *Manager {
 	m := &Manager{
-		babies:        make(map[string]*ManagedBaby),
-		tokenMgr:      tokenMgr,
-		rtmpAddr:      rtmpAddr,
-		rtmpToken:     rtmpToken,
-		sensorPollSec: sensorPollSec,
-		stopCh:        make(chan struct{}),
-		rtmpSub:       rtmpSub,
+		babies:            make(map[string]*ManagedBaby),
+		tokenMgr:          tokenMgr,
+		rtmpAddr:          rtmpAddr,
+		rtmpToken:         rtmpToken,
+		sensorPollSec:     sensorPollSec,
+		stopCh:            make(chan struct{}),
+		rtmpSub:           rtmpSub,
+		lastStreamRestart: make(map[string]time.Time),
 	}
 
 	if pushCredsFile != "" {
@@ -114,6 +118,8 @@ func (m *Manager) Start() error {
 		go m.messagePollLoop()
 	}
 
+	go m.streamWatchdogLoop()
+
 	return nil
 }
 
@@ -127,6 +133,7 @@ func (m *Manager) Stop() {
 	m.started = false
 	stopping := m.babies
 	m.babies = make(map[string]*ManagedBaby)
+	m.lastStreamRestart = make(map[string]time.Time)
 	m.mu.Unlock()
 
 	m.pushActive = false
@@ -686,7 +693,12 @@ func (m *Manager) handlePushNotification(notif nanit.PushNotification) {
 	}
 }
 
-const messagePollInterval = 15 * time.Second
+const (
+	messagePollInterval      = 15 * time.Second
+	streamWatchdogInterval   = 30 * time.Second
+	streamWatchdogGrace      = 15 * time.Second
+	streamWatchdogCooldown   = 60 * time.Second
+)
 
 func (m *Manager) messagePollLoop() {
 	lastSeenID := make(map[string]int64)
@@ -762,6 +774,61 @@ func (m *Manager) messagePollLoop() {
 				})
 			}
 		}
+	}
+}
+
+func (m *Manager) streamWatchdogLoop() {
+	select {
+	case <-m.stopCh:
+		return
+	case <-time.After(streamWatchdogGrace):
+	}
+
+	ticker := time.NewTicker(streamWatchdogInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			m.checkStreamHealth()
+		}
+	}
+}
+
+func (m *Manager) checkStreamHealth() {
+	m.mu.Lock()
+	snapshot := make(map[string]*ManagedBaby, len(m.babies))
+	for uid, mb := range m.babies {
+		snapshot[uid] = mb
+	}
+	m.mu.Unlock()
+
+	now := time.Now()
+	for uid, mb := range snapshot {
+		if !mb.State.IsWSAlive() {
+			continue
+		}
+		if m.rtmpSub.HasStream(uid) {
+			continue
+		}
+
+		m.mu.Lock()
+		last := m.lastStreamRestart[uid]
+		m.mu.Unlock()
+
+		if now.Sub(last) < streamWatchdogCooldown {
+			continue
+		}
+
+		log.Printf("[manager] stream watchdog: %s has WS but no RTMP publisher, re-requesting stream", uid)
+		m.mu.Lock()
+		m.lastStreamRestart[uid] = now
+		m.mu.Unlock()
+
+		mb.State.SetStreamState(StreamStopped)
+		mb.client.RestartStreaming()
 	}
 }
 
