@@ -109,7 +109,13 @@ func (p *PushReceiver) Stop() {
 	}
 	p.mu.Unlock()
 
-	p.wg.Wait()
+	ch := make(chan struct{})
+	go func() { p.wg.Wait(); close(ch) }()
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		log.Println("[push] stop: timed out waiting for FCM listener")
+	}
 }
 
 func (p *PushReceiver) register() (*PushCredentials, error) {

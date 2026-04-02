@@ -1,6 +1,7 @@
 package nanit
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -141,7 +142,7 @@ func (c *CameraClient) Stop() {
 	go func() { c.wg.Wait(); close(ch) }()
 	select {
 	case <-ch:
-	case <-time.After(3 * time.Second):
+	case <-time.After(5 * time.Second):
 		log.Printf("[camera:%s] stop: timed out waiting for goroutines", c.cameraUID)
 	}
 }
@@ -154,6 +155,11 @@ func (c *CameraClient) delayedAction(d time.Duration, fn func()) {
 		case <-c.done:
 			return
 		case <-time.After(d):
+		}
+		select {
+		case <-c.done:
+			return
+		default:
 		}
 		fn()
 	}()
@@ -194,12 +200,22 @@ func (c *CameraClient) connect() error {
 		"Authorization": []string{"Bearer " + token},
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-c.done:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	defer cancel()
+
 	dialer := websocket.Dialer{
 		TLSClientConfig:  &tls.Config{},
 		HandshakeTimeout: 10 * time.Second,
 	}
 
-	conn, _, err := dialer.Dial(url, header)
+	conn, _, err := dialer.DialContext(ctx, url, header)
 	if err != nil {
 		return fmt.Errorf("websocket dial: %w", err)
 	}

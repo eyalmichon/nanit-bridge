@@ -93,6 +93,7 @@ type State struct {
 	WSAlive    bool
 
 	subscribers []func()
+	alertTimer  *time.Timer
 }
 
 func NewState(babyUID, cameraUID, name string) *State {
@@ -113,11 +114,16 @@ func (s *State) UpdateSensors(fn func(*SensorState)) {
 	s.mu.Lock()
 	fn(&s.Sensors)
 	s.Sensors.LastUpdate = time.Now()
+	hasAlert := s.Sensors.CryDetected || s.Sensors.SoundAlert || s.Sensors.MotionAlert
 	subs := append([]func(){}, s.subscribers...)
 	s.mu.Unlock()
 
 	for _, sub := range subs {
 		sub()
+	}
+
+	if hasAlert {
+		s.scheduleAlertClear()
 	}
 }
 
@@ -169,6 +175,24 @@ func (s *State) UpdateCameraInfo(fn func(*CameraInfo)) {
 	for _, sub := range subs {
 		sub()
 	}
+}
+
+func (s *State) scheduleAlertClear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.alertTimer != nil {
+		s.alertTimer.Reset(AlertTTL + time.Second)
+		return
+	}
+	s.alertTimer = time.AfterFunc(AlertTTL+time.Second, func() {
+		s.mu.Lock()
+		s.alertTimer = nil
+		subs := append([]func(){}, s.subscribers...)
+		s.mu.Unlock()
+		for _, sub := range subs {
+			sub()
+		}
+	})
 }
 
 func (s *State) Snapshot() (SensorState, ControlState, CameraInfo, StreamState, bool) {
