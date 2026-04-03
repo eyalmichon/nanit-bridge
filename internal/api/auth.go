@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,15 +21,74 @@ import (
 const (
 	sessionCookieName = "nanit_session"
 	sessionMaxAge     = 7 * 24 * time.Hour
+
+	maxLoginFailures = 5
+	loginLockoutTime = 30 * time.Second
+	loginEntryMaxAge = 5 * time.Minute
 )
 
+type loginAttempt struct {
+	failures int
+	lastFail time.Time
+}
+
 type authManager struct {
-	authFile string
-	mu       sync.Mutex
+	authFile      string
+	mu            sync.Mutex
+	loginAttempts map[string]*loginAttempt
 }
 
 func newAuthManager(authFile string) *authManager {
-	return &authManager{authFile: authFile}
+	return &authManager{
+		authFile:      authFile,
+		loginAttempts: make(map[string]*loginAttempt),
+	}
+}
+
+func remoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// isLoginLocked checks whether ip has exceeded the failure threshold
+// and the lockout window has not yet expired.
+func (a *authManager) isLoginLocked(ip string) (bool, time.Duration) {
+	entry := a.loginAttempts[ip]
+	if entry == nil || entry.failures < maxLoginFailures {
+		return false, 0
+	}
+	remaining := loginLockoutTime - time.Since(entry.lastFail)
+	if remaining <= 0 {
+		delete(a.loginAttempts, ip)
+		return false, 0
+	}
+	return true, remaining
+}
+
+func (a *authManager) recordLoginFailure(ip string) {
+	entry := a.loginAttempts[ip]
+	if entry == nil {
+		entry = &loginAttempt{}
+		a.loginAttempts[ip] = entry
+	}
+	entry.failures++
+	entry.lastFail = time.Now()
+}
+
+func (a *authManager) clearLoginFailures(ip string) {
+	delete(a.loginAttempts, ip)
+}
+
+func (a *authManager) pruneLoginAttempts() {
+	cutoff := time.Now().Add(-loginEntryMaxAge)
+	for ip, entry := range a.loginAttempts {
+		if entry.lastFail.Before(cutoff) {
+			delete(a.loginAttempts, ip)
+		}
+	}
 }
 
 func (a *authManager) readHashFromDisk() ([]byte, error) {
@@ -108,6 +168,21 @@ func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := remoteIP(r)
+
+	a.mu.Lock()
+	a.pruneLoginAttempts()
+	locked, remaining := a.isLoginLocked(ip)
+	a.mu.Unlock()
+
+	if locked {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", strconv.Itoa(int(remaining.Seconds())+1))
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{"error": "too many failed attempts, try again later"})
+		return
+	}
+
 	var body struct {
 		Password string `json:"password"`
 	}
@@ -117,11 +192,19 @@ func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !a.checkPassword(body.Password) {
+		a.mu.Lock()
+		a.recordLoginFailure(ip)
+		a.mu.Unlock()
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": "invalid password"})
 		return
 	}
+
+	a.mu.Lock()
+	a.clearLoginFailures(ip)
+	a.mu.Unlock()
 
 	token, err := a.signedToken()
 	if err != nil {

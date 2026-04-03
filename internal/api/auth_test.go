@@ -221,6 +221,62 @@ func TestAuthHandlersSetupLoginChangeAndLogout(t *testing.T) {
 	}
 }
 
+func TestLoginRateLimiting(t *testing.T) {
+	a := newTestAuthManager(t)
+	if err := a.writeHash("secret123"); err != nil {
+		t.Fatalf("writeHash error: %v", err)
+	}
+
+	sendLogin := func(password, remoteAddr string) *httptest.ResponseRecorder {
+		body := strings.NewReader(`{"password":"` + password + `"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+		req.RemoteAddr = remoteAddr
+		rr := httptest.NewRecorder()
+		a.handleLogin(rr, req)
+		return rr
+	}
+
+	addr := "10.0.0.1:12345"
+
+	for i := 0; i < maxLoginFailures; i++ {
+		rr := sendLogin("wrong", addr)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status = %d, want 401", i+1, rr.Code)
+		}
+	}
+
+	rr := sendLogin("wrong", addr)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("after lockout: status = %d, want 429", rr.Code)
+	}
+	if rr.Header().Get("Retry-After") == "" {
+		t.Fatalf("expected Retry-After header")
+	}
+
+	rr = sendLogin("secret123", addr)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("correct password during lockout: status = %d, want 429", rr.Code)
+	}
+
+	otherAddr := "10.0.0.2:12345"
+	rr = sendLogin("secret123", otherAddr)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("different IP: status = %d, want 200", rr.Code)
+	}
+
+	a.mu.Lock()
+	a.loginAttempts["10.0.0.1"] = &loginAttempt{
+		failures: maxLoginFailures,
+		lastFail: time.Now().Add(-loginLockoutTime - time.Second),
+	}
+	a.mu.Unlock()
+
+	rr = sendLogin("secret123", addr)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("after lockout expired: status = %d, want 200", rr.Code)
+	}
+}
+
 func TestAuthTokenValidityWindow(t *testing.T) {
 	a := newTestAuthManager(t)
 	if err := a.writeHash("secret123"); err != nil {
