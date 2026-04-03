@@ -155,7 +155,7 @@ func main() {
 	}
 
 	log.Printf("nanit-bridge is running")
-	log.Printf("  RTMP: rtmp://%s/%s/<baby_uid>", cfg.RTMPAddr, cfg.RTMPToken)
+	log.Printf("  RTMP: rtmp://%s/%s/<baby_uid>", cfg.RTMPAddr, maskToken(cfg.RTMPToken))
 	log.Printf("  Dashboard: http://0.0.0.0:%d", cfg.HTTPPort)
 	if cfg.MQTTBrokerURL != "" {
 		log.Printf("  MQTT: %s (prefix: %s)", cfg.MQTTBrokerURL, cfg.MQTTPrefix)
@@ -342,4 +342,11 @@ func vcsVersion() string {
 		rev = rev[:8]
 	}
 	return rev + dirty
+}
+
+func maskToken(s string) string {
+	if len(s) <= 12 {
+		return "****"
+	}
+	return s[:4] + "..." + s[len(s)-4:]
 }

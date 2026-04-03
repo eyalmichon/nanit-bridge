@@ -220,7 +220,6 @@ func (s *Server) Stop() {
 	}
 	if s.lis != nil {
 		s.lis.Close()
-		s.lis = nil
 	}
 }
 
@@ -242,7 +241,7 @@ func (s *Server) handleConnection(c *rtmp.Conn, nc net.Conn) {
 
 	expected := s.token.Load().(string)
 	if subtle.ConstantTimeCompare([]byte(pathToken), []byte(expected)) != 1 {
-		log.Printf("[rtmp] rejected: invalid token from %s (path: %s)", nc.RemoteAddr(), c.URL.Path)
+		log.Printf("[rtmp] rejected: invalid token from %s for stream %q", nc.RemoteAddr(), key)
 		nc.Close()
 		return
 	}
