@@ -6,6 +6,7 @@
   var babies = {};
   var players = {};
   var notifSettings = {};
+  var prevSensors = {};
   var ws;
   var reconnectDelay = 1000;
   var lastWsAuthProbeAt = 0;
@@ -144,6 +145,7 @@
       var msg = JSON.parse(e.data);
       if (msg.type === 'initial') {
         babies = {};
+        prevSensors = {};
         (msg.babies || []).forEach(function(b) { babies[b.uid] = b; });
         Object.keys(players).forEach(destroyPlayer);
         renderAll();
@@ -306,6 +308,12 @@
 
   // ── Card lifecycle ─────────────────────────────────────
 
+  function flashElement(el) {
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+  }
+
   function ensureCard(uid) {
     var card = babiesEl.querySelector('.baby-card[data-uid="' + uid + '"]');
     if (!card) {
@@ -319,10 +327,32 @@
           '<button class="unmute-btn" id="unmute-' + uid + '" title="Unmute">&#128263;</button>' +
         '</div>' +
         '<div class="baby-body">' +
-          '<div id="info-' + uid + '"></div>' +
+          '<div id="info-' + uid + '">' +
+            '<div class="baby-header">' +
+              '<div><h2 id="baby-name-' + uid + '"></h2>' +
+              '<div class="uid" id="baby-uid-' + uid + '"></div></div>' +
+              '<div class="status-pills" id="pills-' + uid + '"></div>' +
+            '</div>' +
+            '<div class="env-grid">' +
+              '<div class="env-item"><div class="env-label">Temp</div>' +
+                '<div class="env-val" id="env-temp-' + uid + '"><span class="env-num"></span><span class="env-unit">\u00b0C</span></div></div>' +
+              '<div class="env-item"><div class="env-label">Humidity</div>' +
+                '<div class="env-val" id="env-humidity-' + uid + '"><span class="env-num"></span><span class="env-unit">%</span></div></div>' +
+              '<div class="env-item"><div class="env-label">Light</div>' +
+                '<div class="env-val" id="env-light-' + uid + '"><span class="env-num"></span><span class="env-unit">lx</span></div></div>' +
+            '</div>' +
+            '<div class="env-extra">' +
+              '<span id="env-daynight-' + uid + '"><span class="env-dot day" id="env-dot-' + uid + '"></span><span id="env-daynight-text-' + uid + '"></span></span>' +
+              '<span id="env-lastupdate-' + uid + '"></span>' +
+            '</div>' +
+          '</div>' +
           '<div id="controls-' + uid + '"></div>' +
         '</div>';
       babiesEl.appendChild(card);
+      ['env-temp-', 'env-humidity-', 'env-light-'].forEach(function(prefix) {
+        var valEl = document.getElementById(prefix + uid);
+        if (valEl) valEl.addEventListener('animationend', function() { this.classList.remove('flash'); });
+      });
       var unmuteBtn = document.getElementById('unmute-' + uid);
       unmuteBtn.onclick = function() {
         var vid = document.getElementById('video-' + uid);
@@ -343,7 +373,6 @@
     emptyState.style.display = 'none';
 
     var card = ensureCard(uid);
-    var infoEl = document.getElementById('info-' + uid);
     var controlsEl = document.getElementById('controls-' + uid);
     var overlay = document.getElementById('overlay-' + uid);
 
@@ -385,23 +414,44 @@
     var lastUpdate = s.last_update && s.last_update !== '0001-01-01T00:00:00Z'
       ? new Date(s.last_update).toLocaleTimeString() : 'no data yet';
 
-    // ── Info section (header + environment) ──
-    infoEl.innerHTML =
-      '<div class="baby-header">' +
-        '<div><h2>' + esc(b.name || uid) + '</h2>' +
-        '<div class="uid">' + esc(uid) + '</div></div>' +
-        '<div class="status-pills">' + streamPill + wsPill + pushPill + '</div>' +
-      '</div>' +
-      '<div class="env-grid">' +
-        envCell('Temp', fmtNum(s.temperature, 1), '\u00b0C') +
-        envCell('Humidity', fmtNum(s.humidity, 1), '%') +
-        envCell('Light', fmtNum(s.light, 0), 'lx') +
-      '</div>' +
-      '<div class="env-extra">' +
-        '<span><span class="env-dot ' + (s.is_night ? 'night' : 'day') + '"></span>' +
-          (s.is_night ? 'Nighttime' : 'Daytime') + '</span>' +
-        '<span>' + lastUpdate + '</span>' +
-      '</div>';
+    // ── Info section (stable DOM updates) ──
+    document.getElementById('baby-name-' + uid).textContent = b.name || uid;
+    document.getElementById('baby-uid-' + uid).textContent = uid;
+
+    var pillKey = (b.stream || '') + '|' + (b.ws_alive ? '1' : '0') + '|' + (b.push_active ? '1' : '0');
+    var pillsEl = document.getElementById('pills-' + uid);
+    if (pillsEl.dataset.state !== pillKey) {
+      pillsEl.dataset.state = pillKey;
+      pillsEl.innerHTML = streamPill + wsPill + pushPill;
+    }
+
+    var tempStr = fmtNum(s.temperature, 1);
+    var humidStr = fmtNum(s.humidity, 1);
+    var lightStr = fmtNum(s.light, 0);
+    var ps = prevSensors[uid];
+
+    var tempValEl = document.getElementById('env-temp-' + uid);
+    var humidValEl = document.getElementById('env-humidity-' + uid);
+    var lightValEl = document.getElementById('env-light-' + uid);
+
+    if (!ps || ps.temp !== tempStr) {
+      tempValEl.querySelector('.env-num').textContent = tempStr;
+      if (ps) flashElement(tempValEl);
+    }
+    if (!ps || ps.humidity !== humidStr) {
+      humidValEl.querySelector('.env-num').textContent = humidStr;
+      if (ps) flashElement(humidValEl);
+    }
+    if (!ps || ps.light !== lightStr) {
+      lightValEl.querySelector('.env-num').textContent = lightStr;
+      if (ps) flashElement(lightValEl);
+    }
+
+    prevSensors[uid] = { temp: tempStr, humidity: humidStr, light: lightStr };
+
+    document.getElementById('env-dot-' + uid).className = 'env-dot ' + (s.is_night ? 'night' : 'day');
+    document.getElementById('env-daynight-text-' + uid).textContent = s.is_night ? 'Nighttime' : 'Daytime';
+    document.getElementById('env-lastupdate-' + uid).textContent = lastUpdate;
 
     // ── Controls section ──
     var tracks = c.soundtracks || [];
@@ -844,13 +894,6 @@
     return '<span class="br-bpm">' + bpm + '</span><span class="br-bpm-unit"> breaths/min</span>';
   }
 
-  function envCell(label, value, unit) {
-    return '<div class="env-item">' +
-      '<div class="env-label">' + label + '</div>' +
-      '<div class="env-val">' + value + '<span class="env-unit">' + unit + '</span></div>' +
-    '</div>';
-  }
-
   function alertChip(label, detected, detectedAt) {
     var active = false;
     var ago = '';
@@ -1006,6 +1049,15 @@
   };
 
   // ── Boot ───────────────────────────────────────────────
+
+  fetch('/api/version').then(function(r) { return r.json(); }).then(function(d) {
+    var v = d.version || '';
+    var el = document.getElementById('headerVersion');
+    if (el && v) {
+      el.textContent = v;
+      el.href = 'https://github.com/eyalmichon/nanit-bridge/releases/tag/' + encodeURIComponent(v);
+    }
+  }).catch(function() {});
 
   refreshNanitStatus();
   setInterval(refreshNanitStatus, 30000);
