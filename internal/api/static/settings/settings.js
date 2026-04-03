@@ -251,9 +251,12 @@
   }
 
   function copyToClipboard(text, btn) {
+    var orig = btn.textContent;
     navigator.clipboard.writeText(text).then(function() {
-      var orig = btn.textContent;
       btn.textContent = 'Copied!';
+      setTimeout(function() { btn.textContent = orig; }, 1200);
+    }).catch(function() {
+      btn.textContent = 'Copy failed';
       setTimeout(function() { btn.textContent = orig; }, 1200);
     });
   }

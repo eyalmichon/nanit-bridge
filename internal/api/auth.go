@@ -116,12 +116,12 @@ func (a *authManager) writeHash(password string) error {
 	return nil
 }
 
-func (a *authManager) checkPassword(password string) bool {
+func (a *authManager) checkPassword(password string) (bool, error) {
 	hash, err := a.readHashFromDisk()
 	if err != nil {
-		return false
+		return false, fmt.Errorf("read auth file: %w", err)
 	}
-	return bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
+	return bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil, nil
 }
 
 // signedToken creates a cookie value: "expiry_unix.hmac_hex".
@@ -140,26 +140,26 @@ func (a *authManager) signedToken() (string, error) {
 	return fmt.Sprintf("%s.%s", payload, sig), nil
 }
 
-func (a *authManager) validateToken(token string) bool {
+func (a *authManager) validateToken(token string) (bool, error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
-		return false
+		return false, nil
 	}
 	payload, sig := parts[0], parts[1]
 
 	expiry, err := strconv.ParseInt(payload, 10, 64)
 	if err != nil || time.Now().Unix() > expiry {
-		return false
+		return false, nil
 	}
 
 	key, err := a.readHashFromDisk()
 	if err != nil {
-		return false
+		return false, fmt.Errorf("read auth file: %w", err)
 	}
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(payload))
 	expected := hex.EncodeToString(mac.Sum(nil))
-	return hmac.Equal([]byte(sig), []byte(expected))
+	return hmac.Equal([]byte(sig), []byte(expected)), nil
 }
 
 func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +191,12 @@ func (a *authManager) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !a.checkPassword(body.Password) {
+	ok, err := a.checkPassword(body.Password)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
 		a.mu.Lock()
 		a.recordLoginFailure(ip)
 		a.mu.Unlock()
@@ -287,7 +292,12 @@ func (a *authManager) handleChangePassword(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "new passwords do not match", http.StatusBadRequest)
 		return
 	}
-	if !a.checkPassword(body.CurrentPassword) {
+	ok, err := a.checkPassword(body.CurrentPassword)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
 		http.Error(w, "invalid current password", http.StatusUnauthorized)
 		return
 	}
@@ -368,8 +378,23 @@ func (a *authManager) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		c, err := r.Cookie(sessionCookieName)
-		if err != nil || !a.validateToken(c.Value) {
+		c, cookieErr := r.Cookie(sessionCookieName)
+		if cookieErr != nil {
+			if isAPIRequest(r) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			} else {
+				http.Redirect(w, r, "/login", http.StatusFound)
+			}
+			return
+		}
+		valid, authErr := a.validateToken(c.Value)
+		if authErr != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !valid {
 			if isAPIRequest(r) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)

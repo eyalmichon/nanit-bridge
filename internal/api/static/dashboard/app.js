@@ -87,7 +87,7 @@
             : 'Reconnect from this modal or from /settings.';
         }
       })
-      .catch(function() {});
+      .catch(function(err) { console.warn('[nanit-status] fetch failed:', err); });
   }
 
   // ── WebSocket ──────────────────────────────────────────
@@ -111,7 +111,7 @@
           window.location.href = '/setup';
         }
       })
-      .catch(function() {});
+      .catch(function(err) { console.warn('[ws-auth-probe] fetch failed:', err); });
   }
 
   function connect() {
@@ -142,7 +142,8 @@
       }
     };
     ws.onmessage = function(e) {
-      var msg = JSON.parse(e.data);
+      var msg;
+      try { msg = JSON.parse(e.data); } catch (err) { console.warn('[ws] malformed message:', err); return; }
       if (msg.type === 'initial') {
         babies = {};
         prevSensors = {};
@@ -201,6 +202,12 @@
       if (handleAuthError(r)) return;
       if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
       return r;
+    });
+  }
+
+  function sendControlOrWarn(uid, action, value) {
+    sendControl(uid, action, value).catch(function(err) {
+      console.warn('[control] ' + action + ' failed:', err);
     });
   }
 
@@ -277,13 +284,13 @@
     var soundSens = document.getElementById('ctrl-sound-sens-' + uid);
     if (soundSens) {
       soundSens.onchange = function() {
-        sendControl(uid, 'sound_sensitivity', 9 - parseInt(this.value));
+        sendControlOrWarn(uid, 'sound_sensitivity', 9 - parseInt(this.value));
       };
     }
     var motionSens = document.getElementById('ctrl-motion-sens-' + uid);
     if (motionSens) {
       motionSens.onchange = function() {
-        sendControl(uid, 'motion_sensitivity', 250000 - (parseInt(this.value) * 10000));
+        sendControlOrWarn(uid, 'motion_sensitivity', 250000 - (parseInt(this.value) * 10000));
       };
     }
   }
@@ -660,7 +667,7 @@
     if (nlBtn) nlBtn.onclick = function() {
       var newVal = !this.classList.contains('on');
       setPending(uid, 'night_light', newVal);
-      sendControl(uid, 'night_light', newVal);
+      sendControlOrWarn(uid, 'night_light', newVal);
       this.classList.toggle('on', newVal);
     };
 
@@ -668,22 +675,22 @@
     if (pbBtn) pbBtn.onclick = function() {
       var newVal = !this.classList.contains('on');
       setPending(uid, 'playback', newVal);
-      sendControl(uid, 'playback', newVal);
+      sendControlOrWarn(uid, 'playback', newVal);
       this.classList.toggle('on', newVal);
     };
 
     var trackSel = document.getElementById('ctrl-track-' + uid);
-    if (trackSel) trackSel.onchange = function() { sendControl(uid, 'select_track', this.value); };
+    if (trackSel) trackSel.onchange = function() { sendControlOrWarn(uid, 'select_track', this.value); };
 
     var brightSlider = document.getElementById('ctrl-bright-' + uid);
     var brightVal = document.getElementById('ctrl-bright-val-' + uid);
     if (brightSlider) {
       brightSlider.oninput = function() { brightVal.textContent = this.value + '%'; };
-      brightSlider.onchange = function() { sendControl(uid, 'night_light_brightness', parseInt(this.value)); };
+      brightSlider.onchange = function() { sendControlOrWarn(uid, 'night_light_brightness', parseInt(this.value)); };
     }
 
     var nlTimerSel = document.getElementById('ctrl-nl-timer-' + uid);
-    if (nlTimerSel) nlTimerSel.onchange = function() { sendControl(uid, 'night_light_timeout', parseInt(this.value)); };
+    if (nlTimerSel) nlTimerSel.onchange = function() { sendControlOrWarn(uid, 'night_light_timeout', parseInt(this.value)); };
 
     var volSlider = document.getElementById('ctrl-vol-' + uid);
     var volVal = document.getElementById('ctrl-vol-val-' + uid);
@@ -692,7 +699,7 @@
       volSlider.onchange = function() {
         var v = parseInt(this.value);
         setPending(uid, 'volume', v);
-        sendControl(uid, 'volume', v);
+        sendControlOrWarn(uid, 'volume', v);
       };
     }
 
@@ -728,7 +735,7 @@
       this.classList.toggle('on', newVal);
       var hint = document.getElementById('ctrl-sleep-hint-' + uid);
       if (hint) hint.textContent = newVal ? 'Camera is off' : 'Camera is on';
-      sendControl(uid, 'sleep_mode', newVal);
+      sendControlOrWarn(uid, 'sleep_mode', newVal);
     };
 
     var nvCtrl = document.getElementById('ctrl-nightvision-' + uid);
@@ -738,7 +745,7 @@
         btn.onclick = function() {
           nvBtns.forEach(function(b) { b.classList.remove('active'); });
           this.classList.add('active');
-          sendControl(uid, 'night_vision', parseInt(this.getAttribute('data-val'), 10));
+          sendControlOrWarn(uid, 'night_vision', parseInt(this.getAttribute('data-val'), 10));
         };
       });
     }
@@ -747,21 +754,21 @@
     if (slBtn) slBtn.onclick = function() {
       var newVal = !this.classList.contains('on');
       this.classList.toggle('on', newVal);
-      sendControl(uid, 'status_light', newVal);
+      sendControlOrWarn(uid, 'status_light', newVal);
     };
 
     var mmBtn = document.getElementById('ctrl-micmute-' + uid);
     if (mmBtn) mmBtn.onclick = function() {
       var newVal = !this.classList.contains('on');
       this.classList.toggle('on', newVal);
-      sendControl(uid, 'mic_mute', newVal);
+      sendControlOrWarn(uid, 'mic_mute', newVal);
     };
 
     var pollSlider = document.getElementById('ctrl-poll-' + uid);
     var pollVal = document.getElementById('ctrl-poll-val-' + uid);
     if (pollSlider) {
       pollSlider.oninput = function() { pollVal.textContent = this.value + 's'; };
-      pollSlider.onchange = function() { sendControl(uid, 'sensor_poll', parseInt(this.value)); };
+      pollSlider.onchange = function() { sendControlOrWarn(uid, 'sensor_poll', parseInt(this.value)); };
     }
   }
 
@@ -969,7 +976,7 @@
     if (calibrating || bpm === 0) {
       return '<div class="br-viz">' +
         '<div class="br-ring calibrating">' +
-          '<span class="br-viz-label">' + statusText + '</span>' +
+          '<span class="br-viz-label">' + esc(statusText) + '</span>' +
         '</div>' +
       '</div>';
     }
@@ -1022,12 +1029,12 @@
   var logLineCount = 0;
   var LOG_MAX = 500;
 
-  logHeader.onclick = function() {
+  logHeader.addEventListener('click', function() {
     logPanel.classList.toggle('collapsed');
     if (!logPanel.classList.contains('collapsed')) {
       logBody.scrollTop = logBody.scrollHeight;
     }
-  };
+  });
 
   function appendLogLine(line) {
     logLineCount++;
@@ -1148,7 +1155,7 @@
       el.textContent = v;
       el.href = 'https://github.com/eyalmichon/nanit-bridge/releases/tag/' + encodeURIComponent(v);
     }
-  }).catch(function() {});
+  }).catch(function(err) { console.warn('[version] fetch failed:', err); });
 
   refreshNanitStatus();
   setInterval(refreshNanitStatus, 30000);

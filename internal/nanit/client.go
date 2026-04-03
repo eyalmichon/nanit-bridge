@@ -77,7 +77,7 @@ type CameraClient struct {
 	wg              sync.WaitGroup
 	streamRetryMu   sync.Mutex
 	streamRetrying  bool
-	lastWinLocation *pb.Point
+	lastWinLocation atomic.Pointer[pb.Point]
 }
 
 func NewCameraClient(cameraUID, babyUID string, tokenMgr *TokenManager, rtmpURL string, sensorPollSec int) *CameraClient {
@@ -421,10 +421,11 @@ func (c *CameraClient) handleRequest(req *pb.Request) {
 			switch ss.GetState() {
 			case pb.StingStatus_RUNNING, pb.StingStatus_PAUSED, pb.StingStatus_RESUMING:
 				if ss.GetWinLocation() != nil {
-					c.lastWinLocation = ss.GetWinLocation()
+					pt := proto.Clone(ss.GetWinLocation()).(*pb.Point)
+					c.lastWinLocation.Store(pt)
 				}
 			case pb.StingStatus_INIT_FAILED, pb.StingStatus_COMPLETED_AFTER_INIT_FAILED:
-				c.lastWinLocation = nil
+				c.lastWinLocation.Store(nil)
 			}
 			if c.onStingStatus != nil {
 				c.onStingStatus(ss)
@@ -934,9 +935,9 @@ func (c *CameraClient) StartBreathingMonitoring(point *BmmPatternPoint) error {
 			y := int32(point.Y)
 			ss.WinLocation = &pb.Point{X: &x, Y: &y}
 			log.Printf("[camera:%s] sting start with BMM point: x=%d y=%d", c.cameraUID, point.X, point.Y)
-		} else if c.lastWinLocation != nil {
-			log.Printf("[camera:%s] sting start with cached win_location: %v", c.cameraUID, c.lastWinLocation)
-			ss.WinLocation = c.lastWinLocation
+		} else if loc := c.lastWinLocation.Load(); loc != nil {
+			log.Printf("[camera:%s] sting start with cached win_location: %v", c.cameraUID, loc)
+			ss.WinLocation = loc
 		} else {
 			log.Printf("[camera:%s] sting start with no coordinates", c.cameraUID)
 		}

@@ -25,10 +25,14 @@ func TestAuthManagerWriteAndCheckPassword(t *testing.T) {
 	if err := a.writeHash("secret123"); err != nil {
 		t.Fatalf("writeHash error: %v", err)
 	}
-	if !a.checkPassword("secret123") {
+	if ok, err := a.checkPassword("secret123"); err != nil {
+		t.Fatalf("checkPassword error: %v", err)
+	} else if !ok {
 		t.Fatalf("expected checkPassword true")
 	}
-	if a.checkPassword("wrong") {
+	if ok, err := a.checkPassword("wrong"); err != nil {
+		t.Fatalf("checkPassword error: %v", err)
+	} else if ok {
 		t.Fatalf("expected checkPassword false for wrong password")
 	}
 }
@@ -43,7 +47,9 @@ func TestAuthManagerSignedTokenAndValidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("signedToken error: %v", err)
 	}
-	if !a.validateToken(token) {
+	if ok, err := a.validateToken(token); err != nil {
+		t.Fatalf("validateToken error: %v", err)
+	} else if !ok {
 		t.Fatalf("expected signed token to validate")
 	}
 
@@ -52,7 +58,9 @@ func TestAuthManagerSignedTokenAndValidate(t *testing.T) {
 		t.Fatalf("invalid token format: %q", token)
 	}
 	tampered := parts[0] + ".00" + parts[1][2:]
-	if a.validateToken(tampered) {
+	if ok, err := a.validateToken(tampered); err != nil {
+		t.Fatalf("validateToken error: %v", err)
+	} else if ok {
 		t.Fatalf("expected tampered token to fail validation")
 	}
 }
@@ -73,7 +81,9 @@ func TestAuthManagerValidateExpiredToken(t *testing.T) {
 	sig := hex.EncodeToString(mac.Sum(nil))
 	token := expired + "." + sig
 
-	if a.validateToken(token) {
+	if ok, err := a.validateToken(token); err != nil {
+		t.Fatalf("validateToken error: %v", err)
+	} else if ok {
 		t.Fatalf("expected expired token to fail validation")
 	}
 }
@@ -199,7 +209,9 @@ func TestAuthHandlersSetupLoginChangeAndLogout(t *testing.T) {
 	if changeRR.Code != http.StatusOK {
 		t.Fatalf("change-password status = %d, want 200", changeRR.Code)
 	}
-	if !a.checkPassword("newsecret") {
+	if ok, err := a.checkPassword("newsecret"); err != nil {
+		t.Fatalf("checkPassword error: %v", err)
+	} else if !ok {
 		t.Fatalf("new password hash not applied")
 	}
 
@@ -286,7 +298,9 @@ func TestAuthTokenValidityWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("signedToken error: %v", err)
 	}
-	if !a.validateToken(token) {
+	if ok, err := a.validateToken(token); err != nil {
+		t.Fatalf("validateToken error: %v", err)
+	} else if !ok {
 		t.Fatalf("token should be valid immediately")
 	}
 	// Sanity check that token lifetime is future-dated.

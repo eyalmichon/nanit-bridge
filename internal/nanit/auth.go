@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -109,7 +110,10 @@ func (tm *TokenManager) Login() (mfaToken string, err error) {
 	}
 	defer resp.Body.Close()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("login: read response: %w", err)
+	}
 	var result map[string]interface{}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return "", fmt.Errorf("login: failed to parse response: %w", err)
@@ -145,7 +149,10 @@ func (tm *TokenManager) LoginWithMFA(mfaToken, mfaCode string) error {
 	}
 	defer resp.Body.Close()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("MFA login: read response: %w", err)
+	}
 	if resp.StatusCode != 200 && resp.StatusCode != 201 {
 		return fmt.Errorf("MFA login failed: HTTP %d", resp.StatusCode)
 	}
@@ -185,7 +192,10 @@ func (tm *TokenManager) refresh() (string, error) {
 	}
 	defer resp.Body.Close()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("token refresh: read response: %w", err)
+	}
 
 	if resp.StatusCode == 404 {
 		return "", fmt.Errorf("refresh token expired; re-login required")
@@ -221,7 +231,10 @@ func (tm *TokenManager) FetchBabies() ([]Baby, error) {
 	}
 	defer resp.Body.Close()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("fetch babies: read response: %w", err)
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("fetch babies: HTTP %d", resp.StatusCode)
 	}
@@ -282,7 +295,10 @@ func (tm *TokenManager) GetNotificationSettings(babyUID string) (NotificationSet
 	}
 	defer resp.Body.Close()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("get notification settings: read response: %w", err)
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("get notification settings: HTTP %d", resp.StatusCode)
 	}
@@ -323,7 +339,10 @@ func (tm *TokenManager) PutNotificationSettings(babyUID string, updates Notifica
 	}
 	defer resp.Body.Close()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("put notification settings: read response: %w", err)
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("put notification settings: HTTP %d", resp.StatusCode)
 	}
@@ -369,7 +388,10 @@ func (tm *TokenManager) FetchMessages(babyUID string, limit int) ([]AlertMessage
 	}
 	defer resp.Body.Close()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("fetch messages: read response: %w", err)
+	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("fetch messages: HTTP %d", resp.StatusCode)
 	}
@@ -445,19 +467,31 @@ func (tm *TokenManager) save() {
 
 	data, err := json.MarshalIndent(sessionCopy, "", "  ")
 	if err != nil {
+		log.Printf("[auth] warning: failed to marshal session: %v", err)
 		return
 	}
-	_ = os.MkdirAll(dirOf(tm.filePath), 0o700)
-	_ = os.WriteFile(tm.filePath, data, 0o600)
+	if err := os.MkdirAll(dirOf(tm.filePath), 0o700); err != nil {
+		log.Printf("[auth] warning: failed to create session dir: %v", err)
+		return
+	}
+	if err := os.WriteFile(tm.filePath, data, 0o600); err != nil {
+		log.Printf("[auth] warning: failed to write session file: %v", err)
+	}
 }
 
 func (tm *TokenManager) saveLocked() {
 	data, err := json.MarshalIndent(tm.session, "", "  ")
 	if err != nil {
+		log.Printf("[auth] warning: failed to marshal session: %v", err)
 		return
 	}
-	_ = os.MkdirAll(dirOf(tm.filePath), 0o700)
-	_ = os.WriteFile(tm.filePath, data, 0o600)
+	if err := os.MkdirAll(dirOf(tm.filePath), 0o700); err != nil {
+		log.Printf("[auth] warning: failed to create session dir: %v", err)
+		return
+	}
+	if err := os.WriteFile(tm.filePath, data, 0o600); err != nil {
+		log.Printf("[auth] warning: failed to write session file: %v", err)
+	}
 }
 
 func (tm *TokenManager) apiPost(path string, body interface{}) (*http.Response, error) {
@@ -568,7 +602,10 @@ func (tm *TokenManager) GetBmmPatternLocation(babyUID string, framePNG []byte, i
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("bmm: read response: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("bmm status %d: %s", resp.StatusCode, string(body))
 	}

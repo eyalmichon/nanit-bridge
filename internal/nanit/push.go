@@ -168,7 +168,10 @@ func (p *PushReceiver) registerWithNanit(creds *PushCredentials) error {
 		pushToken = creds.GcmToken
 	}
 	body := map[string]string{"token": pushToken}
-	bodyBytes, _ := json.Marshal(body)
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal push token: %w", err)
+	}
 
 	url := apiBase + "/devices/android"
 	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
@@ -186,7 +189,10 @@ func (p *PushReceiver) registerWithNanit(creds *PushCredentials) error {
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("POST /devices/android: read response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		log.Printf("[push] Nanit registration failed: HTTP %d body=%s", resp.StatusCode, string(respBody))
 		return fmt.Errorf("POST /devices/android returned %d: %s", resp.StatusCode, string(respBody))

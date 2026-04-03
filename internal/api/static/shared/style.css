@@ -513,6 +513,12 @@ select.ctrl-select:focus { outline: 1px solid var(--accent); }
   cursor: pointer; user-select: none;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
+  width: 100%;
+  background: none;
+  border-top: none; border-left: none; border-right: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 .log-title {
   font-size: 0.68rem; font-weight: 600;
