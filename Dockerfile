@@ -12,11 +12,13 @@ RUN go mod download
 COPY . .
 RUN make generate
 RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION}" -o /nanit-bridge ./cmd/nanit-bridge
+RUN mkdir -p /data && touch /data/.keep && chown -R 65532:65532 /data
 
-FROM gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=builder /nanit-bridge /nanit-bridge
+COPY --from=builder --chown=nonroot:nonroot /data /data
 
 EXPOSE 1935 8080
-
+USER nonroot
 ENTRYPOINT ["/nanit-bridge"]
