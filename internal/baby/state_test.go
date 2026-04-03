@@ -53,12 +53,12 @@ func TestStateUpdatesAndSubscribers(t *testing.T) {
 		t.Fatalf("subscriber calls after UpdateSensors = %d, want 1", calls.Load())
 	}
 
-	sensors, _, _, _, _ := s.Snapshot()
-	if sensors.Temperature != 22.5 || sensors.Humidity != 55.1 {
-		t.Fatalf("unexpected sensor snapshot: %+v", sensors)
+	snap := s.Snapshot()
+	if snap.Sensors.Temperature != 22.5 || snap.Sensors.Humidity != 55.1 {
+		t.Fatalf("unexpected sensor snapshot: %+v", snap.Sensors)
 	}
-	if sensors.LastUpdate.Before(before) {
-		t.Fatalf("LastUpdate %v before test start %v", sensors.LastUpdate, before)
+	if snap.Sensors.LastUpdate.Before(before) {
+		t.Fatalf("LastUpdate %v before test start %v", snap.Sensors.LastUpdate, before)
 	}
 
 	s.UpdateControls(func(c *ControlState) {
@@ -75,17 +75,17 @@ func TestStateUpdatesAndSubscribers(t *testing.T) {
 		t.Fatalf("subscriber calls total = %d, want 5", calls.Load())
 	}
 
-	_, controls, camera, stream, ws := s.Snapshot()
-	if !controls.NightLight || controls.Volume != 20 {
-		t.Fatalf("unexpected controls snapshot: %+v", controls)
+	snap2 := s.Snapshot()
+	if !snap2.Controls.NightLight || snap2.Controls.Volume != 20 {
+		t.Fatalf("unexpected controls snapshot: %+v", snap2.Controls)
 	}
-	if camera.FirmwareVersion != "1.2.3" {
-		t.Fatalf("unexpected camera snapshot: %+v", camera)
+	if snap2.Camera.FirmwareVersion != "1.2.3" {
+		t.Fatalf("unexpected camera snapshot: %+v", snap2.Camera)
 	}
-	if stream != StreamActive {
-		t.Fatalf("stream = %v, want %v", stream, StreamActive)
+	if snap2.Stream != StreamActive {
+		t.Fatalf("stream = %v, want %v", snap2.Stream, StreamActive)
 	}
-	if !ws {
+	if !snap2.WSAlive {
 		t.Fatalf("ws alive = false, want true")
 	}
 }
@@ -109,13 +109,13 @@ func TestStateSnapshotConcurrentAccess(t *testing.T) {
 	}
 
 	for i := 0; i < 100; i++ {
-		_, _, _, _, _ = s.Snapshot()
+		s.Snapshot()
 	}
 	wg.Wait()
 
-	_, controls, _, _, _ := s.Snapshot()
-	if controls.Volume < 0 || controls.Volume > 9 {
-		t.Fatalf("unexpected final volume: %d", controls.Volume)
+	snap := s.Snapshot()
+	if snap.Controls.Volume < 0 || snap.Controls.Volume > 9 {
+		t.Fatalf("unexpected final volume: %d", snap.Controls.Volume)
 	}
 }
 
@@ -131,14 +131,14 @@ func TestAlertAutoClearAfterTTL(t *testing.T) {
 		ss.MotionAlertAt = old
 	})
 
-	sensors, _, _, _, _ := s.Snapshot()
-	if sensors.CryDetected {
+	snap := s.Snapshot()
+	if snap.Sensors.CryDetected {
 		t.Fatalf("CryDetected should auto-clear after TTL")
 	}
-	if sensors.SoundAlert {
+	if snap.Sensors.SoundAlert {
 		t.Fatalf("SoundAlert should auto-clear after TTL")
 	}
-	if sensors.MotionAlert {
+	if snap.Sensors.MotionAlert {
 		t.Fatalf("MotionAlert should auto-clear after TTL")
 	}
 }

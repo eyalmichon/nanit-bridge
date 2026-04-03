@@ -857,48 +857,25 @@ func (c *CameraClient) SetMicMute(on bool) error {
 }
 
 func (c *CameraClient) SetSoundSensitivity(value int32) error {
-	sType := pb.SensorType_SOUND
-	useLow := true
-	useHigh := true
-	low := soundLowThresholdDefault
-	high := value
-	sampleSec := sensorSampleIntervalSec
-	triggerSec := sensorTriggerIntervalSec
-	settings := &pb.Settings{
-		Sensors: []*pb.Settings_SensorSettings{{
-			SensorType:         &sType,
-			UseLowThreshold:    &useLow,
-			UseHighThreshold:   &useHigh,
-			LowThreshold:       &low,
-			HighThreshold:      &high,
-			SampleIntervalSec:  &sampleSec,
-			TriggerIntervalSec: &triggerSec,
-		}},
-	}
-	err := c.sendRequest(pb.RequestType_PUT_SETTINGS, func(req *pb.Request) {
-		req.Settings = settings
-	})
-	if err == nil && c.onSettings != nil {
-		c.onSettings(settings)
-	}
-	return err
+	return c.setSensitivity(pb.SensorType_SOUND, soundLowThresholdDefault, value)
 }
 
 func (c *CameraClient) SetMotionSensitivity(value int32) error {
-	sType := pb.SensorType_MOTION
+	return c.setSensitivity(pb.SensorType_MOTION, motionLowThresholdDefault, value)
+}
+
+func (c *CameraClient) setSensitivity(sensorType pb.SensorType, lowThreshold, highThreshold int32) error {
 	useLow := true
 	useHigh := true
-	low := motionLowThresholdDefault
-	high := value
 	sampleSec := sensorSampleIntervalSec
 	triggerSec := sensorTriggerIntervalSec
 	settings := &pb.Settings{
 		Sensors: []*pb.Settings_SensorSettings{{
-			SensorType:         &sType,
+			SensorType:         &sensorType,
 			UseLowThreshold:    &useLow,
 			UseHighThreshold:   &useHigh,
-			LowThreshold:       &low,
-			HighThreshold:      &high,
+			LowThreshold:       &lowThreshold,
+			HighThreshold:      &highThreshold,
 			SampleIntervalSec:  &sampleSec,
 			TriggerIntervalSec: &triggerSec,
 		}},

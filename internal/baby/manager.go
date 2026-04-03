@@ -179,34 +179,26 @@ func (m *Manager) GetState(babyUID string) *State {
 	return nil
 }
 
-func (m *Manager) SetNightLight(babyUID string, on bool) error {
+func (m *Manager) withClient(babyUID string, fn func(*nanit.CameraClient) error) error {
 	m.mu.Lock()
 	mb, ok := m.babies[babyUID]
 	m.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("baby %q not found", babyUID)
 	}
-	return mb.client.SetNightLight(on)
+	return fn(mb.client)
+}
+
+func (m *Manager) SetNightLight(babyUID string, on bool) error {
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetNightLight(on) })
 }
 
 func (m *Manager) SetNightLightTimeout(babyUID string, seconds int) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.SetNightLightTimeout(seconds)
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetNightLightTimeout(seconds) })
 }
 
 func (m *Manager) SetNightLightBrightness(babyUID string, level int) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.SetNightLightBrightness(level)
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetNightLightBrightness(level) })
 }
 
 func (m *Manager) StartBreathingMonitoring(babyUID string) error {
@@ -315,13 +307,7 @@ func decodeKeyframe(spsNALUs, ppsNALUs [][]byte, videoData []byte) ([]byte, erro
 }
 
 func (m *Manager) StopBreathingMonitoring(babyUID string) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.StopBreathingMonitoring()
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.StopBreathingMonitoring() })
 }
 
 func (m *Manager) RestartStream(babyUID string) {
@@ -336,84 +322,38 @@ func (m *Manager) RestartStream(babyUID string) {
 }
 
 func (m *Manager) SetSleepMode(babyUID string, on bool) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.SetSleepMode(on)
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetSleepMode(on) })
 }
 
 func (m *Manager) SetNightVision(babyUID string, mode int32) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.SetNightVision(mode)
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetNightVision(mode) })
 }
 
 func (m *Manager) SetStatusLight(babyUID string, on bool) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.SetStatusLight(on)
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetStatusLight(on) })
 }
 
 func (m *Manager) SetMicMute(babyUID string, on bool) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.SetMicMute(on)
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetMicMute(on) })
 }
 
 func (m *Manager) SetPlayback(babyUID string, on bool) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.SetPlayback(on)
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetPlayback(on) })
 }
 
 func (m *Manager) SetPlaybackTrack(babyUID string, trackName string) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.SetPlaybackTrack(true, trackName)
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetPlaybackTrack(true, trackName) })
 }
 
 func (m *Manager) SetVolume(babyUID string, level int) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.SetVolume(level)
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetVolume(level) })
 }
 
 func (m *Manager) SetSensorPollInterval(babyUID string, seconds int) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	mb.client.SetSensorPollInterval(seconds)
-	return nil
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error {
+		c.SetSensorPollInterval(seconds)
+		return nil
+	})
 }
 
 func (m *Manager) GetSensorPollInterval(babyUID string) int {
@@ -440,23 +380,11 @@ func (m *Manager) SetNotificationSetting(babyUID, key string, enabled bool) (nan
 }
 
 func (m *Manager) SetSoundSensitivity(babyUID string, value int) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.SetSoundSensitivity(int32(value))
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetSoundSensitivity(int32(value)) })
 }
 
 func (m *Manager) SetMotionSensitivity(babyUID string, value int) error {
-	m.mu.Lock()
-	mb, ok := m.babies[babyUID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("baby %q not found", babyUID)
-	}
-	return mb.client.SetMotionSensitivity(int32(value))
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetMotionSensitivity(int32(value)) })
 }
 
 func (m *Manager) AllStates() map[string]*State {
@@ -666,27 +594,27 @@ func (m *Manager) handlePushNotification(notif nanit.PushNotification) {
 	now := time.Now()
 
 	switch notif.Type {
-	case "SOUND":
+	case alertTypeSound:
 		mb.State.UpdateSensors(func(s *SensorState) {
 			s.SoundAlert = true
 			s.SoundAlertAt = now
 		})
 		log.Printf("[manager] PUSH: SOUND alert for %s", notif.BabyUID)
-	case "MOTION":
+	case alertTypeMotion:
 		mb.State.UpdateSensors(func(s *SensorState) {
 			s.MotionAlert = true
 			s.MotionAlertAt = now
 		})
 		log.Printf("[manager] PUSH: MOTION alert for %s", notif.BabyUID)
-	case "CAMERA_CRY_DETECTION":
+	case alertTypeCryDetected:
 		mb.State.UpdateSensors(func(s *SensorState) {
 			s.CryDetected = true
 			s.CryDetectedAt = now
 		})
 		log.Printf("[manager] PUSH: CRY alert for %s", notif.BabyUID)
-	case "TEMPERATURE":
+	case alertTypeTemperature:
 		log.Printf("[manager] PUSH: temperature alert for %s", notif.BabyUID)
-	case "HUMIDITY":
+	case alertTypeHumidity:
 		log.Printf("[manager] PUSH: humidity alert for %s", notif.BabyUID)
 	default:
 		log.Printf("[manager] PUSH: %s notification for %s", notif.Type, notif.BabyUID)
@@ -694,6 +622,12 @@ func (m *Manager) handlePushNotification(notif nanit.PushNotification) {
 }
 
 const (
+	alertTypeSound       = "SOUND"
+	alertTypeMotion      = "MOTION"
+	alertTypeCryDetected = "CAMERA_CRY_DETECTION"
+	alertTypeTemperature = "TEMPERATURE"
+	alertTypeHumidity    = "HUMIDITY"
+
 	messagePollInterval      = 15 * time.Second
 	streamWatchdogInterval   = 30 * time.Second
 	streamWatchdogGrace      = 15 * time.Second
@@ -761,11 +695,11 @@ func (m *Manager) messagePollLoop() {
 				mb.State.UpdateSensors(func(s *SensorState) {
 					for _, msg := range newMsgs {
 						switch msg.Type {
-						case "SOUND":
+						case alertTypeSound:
 							s.SoundAlert = true
 							s.SoundAlertAt = time.Unix(msg.Time, 0)
 							log.Printf("[manager] cloud SOUND alert for %s at %v", uid, s.SoundAlertAt.Format(time.Kitchen))
-						case "MOTION":
+						case alertTypeMotion:
 							s.MotionAlert = true
 							s.MotionAlertAt = time.Unix(msg.Time, 0)
 							log.Printf("[manager] cloud MOTION alert for %s at %v", uid, s.MotionAlertAt.Format(time.Kitchen))

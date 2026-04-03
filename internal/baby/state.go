@@ -195,7 +195,15 @@ func (s *State) scheduleAlertClear() {
 	})
 }
 
-func (s *State) Snapshot() (SensorState, ControlState, CameraInfo, StreamState, bool) {
+type StateSnapshot struct {
+	Sensors  SensorState
+	Controls ControlState
+	Camera   CameraInfo
+	Stream   StreamState
+	WSAlive  bool
+}
+
+func (s *State) Snapshot() StateSnapshot {
 	s.mu.RLock()
 	now := time.Now()
 	shouldClear := (s.Sensors.CryDetected && !s.Sensors.CryDetectedAt.IsZero() && now.Sub(s.Sensors.CryDetectedAt) > AlertTTL) ||
@@ -203,7 +211,7 @@ func (s *State) Snapshot() (SensorState, ControlState, CameraInfo, StreamState, 
 		(s.Sensors.MotionAlert && !s.Sensors.MotionAlertAt.IsZero() && now.Sub(s.Sensors.MotionAlertAt) > AlertTTL)
 	if !shouldClear {
 		defer s.mu.RUnlock()
-		return s.Sensors, s.Controls, s.Camera, s.Stream, s.WSAlive
+		return StateSnapshot{s.Sensors, s.Controls, s.Camera, s.Stream, s.WSAlive}
 	}
 	s.mu.RUnlock()
 
@@ -218,7 +226,7 @@ func (s *State) Snapshot() (SensorState, ControlState, CameraInfo, StreamState, 
 	if s.Sensors.MotionAlert && !s.Sensors.MotionAlertAt.IsZero() && now.Sub(s.Sensors.MotionAlertAt) > AlertTTL {
 		s.Sensors.MotionAlert = false
 	}
-	sensors, controls, camera, stream, wsAlive := s.Sensors, s.Controls, s.Camera, s.Stream, s.WSAlive
+	snap := StateSnapshot{s.Sensors, s.Controls, s.Camera, s.Stream, s.WSAlive}
 	s.mu.Unlock()
-	return sensors, controls, camera, stream, wsAlive
+	return snap
 }

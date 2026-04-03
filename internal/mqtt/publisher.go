@@ -23,8 +23,12 @@ type Publisher struct {
 	prefix string
 }
 
+// NewPublisher connects to the MQTT broker. If cfg.BrokerURL is empty, MQTT
+// is disabled and a nil *Publisher is returned. All Publisher methods are
+// nil-receiver safe, so callers may use the result without nil checks.
 func NewPublisher(cfg Config) (*Publisher, error) {
 	if cfg.BrokerURL == "" {
+		log.Printf("[mqtt] no broker URL configured, MQTT disabled")
 		return nil, nil
 	}
 
@@ -72,17 +76,17 @@ func (p *Publisher) PublishState(babyUID string, state *baby.State) {
 		return
 	}
 
-	sensors, _, _, stream, wsAlive := state.Snapshot()
+	snap := state.Snapshot()
 
-	p.pub(babyUID, "temperature", fmt.Sprintf("%.1f", sensors.Temperature))
-	p.pub(babyUID, "humidity", fmt.Sprintf("%.1f", sensors.Humidity))
-	p.pub(babyUID, "light", fmt.Sprintf("%.1f", sensors.Light))
-	p.pub(babyUID, "is_night", boolStr(sensors.IsNight))
-	p.pub(babyUID, "cry_detected", boolStr(sensors.CryDetected))
-	p.pub(babyUID, "sound_alert", boolStr(sensors.SoundAlert))
-	p.pub(babyUID, "motion_alert", boolStr(sensors.MotionAlert))
-	p.pub(babyUID, "stream_state", stream.String())
-	p.pub(babyUID, "ws_alive", boolStr(wsAlive))
+	p.pub(babyUID, "temperature", fmt.Sprintf("%.1f", snap.Sensors.Temperature))
+	p.pub(babyUID, "humidity", fmt.Sprintf("%.1f", snap.Sensors.Humidity))
+	p.pub(babyUID, "light", fmt.Sprintf("%.1f", snap.Sensors.Light))
+	p.pub(babyUID, "is_night", boolStr(snap.Sensors.IsNight))
+	p.pub(babyUID, "cry_detected", boolStr(snap.Sensors.CryDetected))
+	p.pub(babyUID, "sound_alert", boolStr(snap.Sensors.SoundAlert))
+	p.pub(babyUID, "motion_alert", boolStr(snap.Sensors.MotionAlert))
+	p.pub(babyUID, "stream_state", snap.Stream.String())
+	p.pub(babyUID, "ws_alive", boolStr(snap.WSAlive))
 }
 
 // PublishDiscovery sends Home Assistant MQTT auto-discovery messages for a baby.

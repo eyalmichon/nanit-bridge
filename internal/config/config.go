@@ -113,19 +113,22 @@ func loadOrGenerateToken(path string) (string, error) {
 			return token, nil
 		}
 	}
-	token := GenerateRTMPToken()
+	token, err := GenerateRTMPToken()
+	if err != nil {
+		return "", err
+	}
 	if err := WriteRTMPToken(path, token); err != nil {
 		return "", err
 	}
 	return token, nil
 }
 
-func GenerateRTMPToken() string {
+func GenerateRTMPToken() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
+		return "", fmt.Errorf("crypto/rand failed: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
 func WriteRTMPToken(filePath, token string) error {

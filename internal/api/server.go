@@ -718,7 +718,11 @@ func (s *Server) handleRTMPTokenRegenerate(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	newToken := config.GenerateRTMPToken()
+	newToken, err := config.GenerateRTMPToken()
+	if err != nil {
+		http.Error(w, "failed to generate token: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if err := config.WriteRTMPToken(s.rtmpTokenFile, newToken); err != nil {
 		http.Error(w, "failed to write token: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -738,53 +742,53 @@ func (s *Server) handleRTMPTokenRegenerate(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) buildBabyJSON(uid string, state *baby.State) babyJSON {
-	sensors, controls, camera, stream, wsAlive := state.Snapshot()
+	snap := state.Snapshot()
 	return babyJSON{
 		UID:           uid,
 		CameraUID:     state.CameraUID,
 		Name:          state.Name,
-		WSAlive:       wsAlive,
-		Stream:        stream.String(),
+		WSAlive:       snap.WSAlive,
+		Stream:        snap.Stream.String(),
 		RTMPActive:    s.rtmpServer.HasStream(uid),
 		SensorPollSec: s.manager.GetSensorPollInterval(uid),
 		PushActive:    s.manager.IsPushActive(),
 		Sensors: sensorJSON{
-			Temperature:   sensors.Temperature,
-			Humidity:      sensors.Humidity,
-			Light:         sensors.Light,
-			IsNight:       sensors.IsNight,
-			CryDetected:   sensors.CryDetected,
-			CryDetectedAt: sensors.CryDetectedAt.Format(time.RFC3339),
-			SoundAlert:    sensors.SoundAlert,
-			SoundAlertAt:  sensors.SoundAlertAt.Format(time.RFC3339),
-			MotionAlert:   sensors.MotionAlert,
-			MotionAlertAt: sensors.MotionAlertAt.Format(time.RFC3339),
-			LastUpdate:    sensors.LastUpdate.Format(time.RFC3339),
+			Temperature:   snap.Sensors.Temperature,
+			Humidity:      snap.Sensors.Humidity,
+			Light:         snap.Sensors.Light,
+			IsNight:       snap.Sensors.IsNight,
+			CryDetected:   snap.Sensors.CryDetected,
+			CryDetectedAt: snap.Sensors.CryDetectedAt.Format(time.RFC3339),
+			SoundAlert:    snap.Sensors.SoundAlert,
+			SoundAlertAt:  snap.Sensors.SoundAlertAt.Format(time.RFC3339),
+			MotionAlert:   snap.Sensors.MotionAlert,
+			MotionAlertAt: snap.Sensors.MotionAlertAt.Format(time.RFC3339),
+			LastUpdate:    snap.Sensors.LastUpdate.Format(time.RFC3339),
 		},
 		Controls: controlJSON{
-			NightLight:           controls.NightLight,
-			NightLightBrightness: controls.NightLightBrightness,
-			NightLightTimeout:    controls.NightLightTimeout,
-			Volume:               controls.Volume,
-			Playback:             controls.PlaybackActive,
-			CurrentTrack:         controls.CurrentTrack,
-			Soundtracks:          controls.Soundtracks,
-			SoundSensitivity:     controls.SoundSensitivity,
-			MotionSensitivity:    controls.MotionSensitivity,
-			SleepMode:            controls.SleepMode,
-			NightVision:          int(controls.NightVision),
-			StatusLight:          controls.StatusLight,
-			MicMute:              controls.MicMute,
+			NightLight:           snap.Controls.NightLight,
+			NightLightBrightness: snap.Controls.NightLightBrightness,
+			NightLightTimeout:    snap.Controls.NightLightTimeout,
+			Volume:               snap.Controls.Volume,
+			Playback:             snap.Controls.PlaybackActive,
+			CurrentTrack:         snap.Controls.CurrentTrack,
+			Soundtracks:          snap.Controls.Soundtracks,
+			SoundSensitivity:     snap.Controls.SoundSensitivity,
+			MotionSensitivity:    snap.Controls.MotionSensitivity,
+			SleepMode:            snap.Controls.SleepMode,
+			NightVision:          int(snap.Controls.NightVision),
+			StatusLight:          snap.Controls.StatusLight,
+			MicMute:              snap.Controls.MicMute,
 			Breathing: breathingControlJSON{
-				Active:        controls.Breathing.Active,
-				Calibrating:   controls.Breathing.Calibrating,
-				BreathsPerMin: controls.Breathing.BreathsPerMin,
+				Active:        snap.Controls.Breathing.Active,
+				Calibrating:   snap.Controls.Breathing.Calibrating,
+				BreathsPerMin: snap.Controls.Breathing.BreathsPerMin,
 			},
 		},
 		Camera: cameraInfoJSON{
-			FirmwareVersion: camera.FirmwareVersion,
-			HardwareVersion: camera.HardwareVersion,
-			MountingMode:    camera.MountingMode,
+			FirmwareVersion: snap.Camera.FirmwareVersion,
+			HardwareVersion: snap.Camera.HardwareVersion,
+			MountingMode:    snap.Camera.MountingMode,
 		},
 	}
 }

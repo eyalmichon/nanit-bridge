@@ -217,9 +217,11 @@ func (s *Server) Start() error {
 func (s *Server) Stop() {
 	if s.done != nil {
 		close(s.done)
+		s.done = nil
 	}
 	if s.lis != nil {
 		s.lis.Close()
+		s.lis = nil
 	}
 }
 

@@ -21,24 +21,24 @@ func TestManagerHandlePushNotificationUpdatesState(t *testing.T) {
 	m.handlePushNotification(nanit.PushNotification{BabyUID: "baby-1", Type: "TEMPERATURE"})
 	m.handlePushNotification(nanit.PushNotification{BabyUID: "baby-1", Type: "HUMIDITY"})
 
-	sensors, _, _, _, _ := st.Snapshot()
-	if !sensors.SoundAlert {
+	snap := st.Snapshot()
+	if !snap.Sensors.SoundAlert {
 		t.Fatalf("SoundAlert = false, want true")
 	}
-	if !sensors.MotionAlert {
+	if !snap.Sensors.MotionAlert {
 		t.Fatalf("MotionAlert = false, want true")
 	}
-	if !sensors.CryDetected {
+	if !snap.Sensors.CryDetected {
 		t.Fatalf("CryDetected = false, want true")
 	}
-	if time.Since(sensors.SoundAlertAt) > 5*time.Second {
-		t.Fatalf("SoundAlertAt is too old: %v", sensors.SoundAlertAt)
+	if time.Since(snap.Sensors.SoundAlertAt) > 5*time.Second {
+		t.Fatalf("SoundAlertAt is too old: %v", snap.Sensors.SoundAlertAt)
 	}
-	if time.Since(sensors.MotionAlertAt) > 5*time.Second {
-		t.Fatalf("MotionAlertAt is too old: %v", sensors.MotionAlertAt)
+	if time.Since(snap.Sensors.MotionAlertAt) > 5*time.Second {
+		t.Fatalf("MotionAlertAt is too old: %v", snap.Sensors.MotionAlertAt)
 	}
-	if time.Since(sensors.CryDetectedAt) > 5*time.Second {
-		t.Fatalf("CryDetectedAt is too old: %v", sensors.CryDetectedAt)
+	if time.Since(snap.Sensors.CryDetectedAt) > 5*time.Second {
+		t.Fatalf("CryDetectedAt is too old: %v", snap.Sensors.CryDetectedAt)
 	}
 }
 
