@@ -29,7 +29,10 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-const logRingSize = 200
+const (
+	logRingSize           = 200
+	httpReadHeaderTimeout = 10 * time.Second
+)
 
 // LogBroadcaster is an io.Writer that buffers log lines in a ring buffer and
 // broadcasts them to registered listener functions. It can be created before the
@@ -276,7 +279,7 @@ func (s *Server) Start() error {
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: httpReadHeaderTimeout,
 	}
 	s.mu.Lock()
 	s.httpSrv = srv

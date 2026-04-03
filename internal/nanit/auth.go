@@ -2,6 +2,7 @@ package nanit
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/textproto"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -55,15 +57,25 @@ type TokenManager struct {
 	password string
 	filePath string
 	client   *http.Client
+	ctx      atomic.Pointer[context.Context] // separate from mu to avoid re-entrant locking
 }
 
 func NewTokenManager(email, password, sessionFile string) *TokenManager {
-	return &TokenManager{
+	tm := &TokenManager{
 		session:  Session{Email: email},
 		password: password,
 		filePath: sessionFile,
 		client:   &http.Client{Timeout: 15 * time.Second},
 	}
+	bg := context.Background()
+	tm.ctx.Store(&bg)
+	return tm
+}
+
+// SetContext sets the context used for all outbound HTTP requests,
+// enabling cancellation on shutdown.
+func (tm *TokenManager) SetContext(ctx context.Context) {
+	tm.ctx.Store(&ctx)
 }
 
 func (tm *TokenManager) SetCredentials(email, password string) {
@@ -94,6 +106,13 @@ func (tm *TokenManager) GetSession() Session {
 
 func (tm *TokenManager) HTTPClient() *http.Client {
 	return tm.client
+}
+
+func (tm *TokenManager) Context() context.Context {
+	if p := tm.ctx.Load(); p != nil {
+		return *p
+	}
+	return context.Background()
 }
 
 // Login performs initial email/password authentication.
@@ -217,7 +236,7 @@ func (tm *TokenManager) FetchBabies() ([]Baby, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("GET", apiBase+"/babies", nil)
+	req, err := http.NewRequestWithContext(tm.Context(), "GET", apiBase+"/babies", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +300,7 @@ func (tm *TokenManager) GetNotificationSettings(babyUID string) (NotificationSet
 	}
 
 	url := fmt.Sprintf("%s/babies/%s/notification_settings", apiBase, babyUID)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(tm.Context(), "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +343,7 @@ func (tm *TokenManager) PutNotificationSettings(babyUID string, updates Notifica
 	body, _ := json.Marshal(payload)
 
 	url := fmt.Sprintf("%s/babies/%s/notification_settings", apiBase, babyUID)
-	req, err := http.NewRequest("PUT", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(tm.Context(), "PUT", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +393,7 @@ func (tm *TokenManager) FetchMessages(babyUID string, limit int) ([]AlertMessage
 	}
 
 	url := fmt.Sprintf("%s/babies/%s/messages?limit=%d", apiBase, babyUID, limit)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(tm.Context(), "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -508,7 +527,7 @@ func (tm *TokenManager) buildRequest(method, url string, body interface{}) (*htt
 		return nil, err
 	}
 
-	req, err := http.NewRequest(method, url, bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(tm.Context(), method, url, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, err
 	}
@@ -587,7 +606,7 @@ func (tm *TokenManager) GetBmmPatternLocation(babyUID string, framePNG []byte, i
 	w.Close()
 
 	url := fmt.Sprintf("%s/focus/babies/%s/bmm/sessions", apiBase, babyUID)
-	req, err := http.NewRequest("POST", url, &buf)
+	req, err := http.NewRequestWithContext(tm.Context(), "POST", url, &buf)
 	if err != nil {
 		return nil, err
 	}

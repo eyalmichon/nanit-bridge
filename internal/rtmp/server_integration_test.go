@@ -1,6 +1,7 @@
 package rtmp
 
 import (
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -141,6 +142,50 @@ func TestServerRejectsNoToken(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected connection without token to fail, but it succeeded")
 	}
+}
+
+func TestServerStopTerminatesAcceptGoroutine(t *testing.T) {
+	port := freePort(t)
+	s := NewServer(port, "tok")
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+
+	// Verify listener is accepting.
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
+	if err != nil {
+		t.Fatalf("dial before stop: %v", err)
+	}
+	conn.Close()
+
+	s.Stop()
+
+	// After Stop, the port should refuse connections promptly (no lingering goroutine).
+	// Give a brief moment for the OS to release the socket.
+	time.Sleep(50 * time.Millisecond)
+	conn, err = net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+	if err == nil {
+		conn.Close()
+		t.Fatalf("expected dial after stop to fail, but it connected")
+	}
+}
+
+func TestServerDoubleStopDoesNotPanic(t *testing.T) {
+	port := freePort(t)
+	s := NewServer(port, "tok")
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+
+	// Both calls must complete without panic.
+	s.Stop()
+	s.Stop()
+}
+
+func TestServerStopBeforeStart(t *testing.T) {
+	s := NewServer(0, "tok")
+	// Stop on a never-started server must not panic.
+	s.Stop()
 }
 
 func itoa(v int) string {

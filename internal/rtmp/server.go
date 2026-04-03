@@ -18,6 +18,8 @@ import (
 
 var pathPattern = regexp.MustCompile(`^/?([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)$`)
 
+const acceptRetryDelay = time.Second
+
 // broadcaster manages a single published stream and its subscribers.
 type broadcaster struct {
 	mu          sync.RWMutex
@@ -112,7 +114,8 @@ func (b *broadcaster) broadcast(pkt av.Packet) {
 // and serves streams to consumers (go2rtc/Frigate).
 //
 // All RTMP connections must include a valid token in the path:
-//   rtmp://host:port/{token}/local/{uid}
+//
+//	rtmp://host:port/{token}/local/{uid}
 type Server struct {
 	port                  int
 	token                 atomic.Value
@@ -121,6 +124,7 @@ type Server struct {
 	onPublisherDisconnect func(key string)
 	lis                   net.Listener
 	done                  chan struct{}
+	stopOnce              sync.Once
 }
 
 func NewServer(port int, token string) *Server {
@@ -204,7 +208,7 @@ func (s *Server) Start() error {
 				default:
 				}
 				log.Printf("[rtmp] accept error: %v", err)
-				time.Sleep(time.Second)
+				time.Sleep(acceptRetryDelay)
 				continue
 			}
 			go srv.HandleNetConn(nc)
@@ -215,14 +219,14 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Stop() {
-	if s.done != nil {
-		close(s.done)
-		s.done = nil
-	}
-	if s.lis != nil {
-		s.lis.Close()
-		s.lis = nil
-	}
+	s.stopOnce.Do(func() {
+		if s.done != nil {
+			close(s.done)
+		}
+		if s.lis != nil {
+			s.lis.Close()
+		}
+	})
 }
 
 func parseStreamPath(path string) (pathToken, key string, err error) {

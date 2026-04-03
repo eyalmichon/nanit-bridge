@@ -1,6 +1,6 @@
 services:
   nanit-bridge:
-    image: ghcr.io/eyalmichon/nanit-bridge:latest
+    image: ghcr.io/eyalmichon/nanit-bridge:${NANIT_VERSION:-latest}
     container_name: nanit-bridge
     restart: unless-stopped
     ports:

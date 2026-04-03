@@ -18,10 +18,15 @@ import (
 )
 
 var (
-	keepaliveInterval = 25 * time.Second
-	reconnectInterval = 5 * time.Second
-	staleTimeout      = 90 * time.Second
-	writeTimeout      = 5 * time.Second
+	keepaliveInterval       = 25 * time.Second
+	reconnectInterval       = 5 * time.Second
+	staleTimeout            = 90 * time.Second
+	writeTimeout            = 5 * time.Second
+	stopTimeout             = 5 * time.Second
+	wsHandshakeTimeout      = 10 * time.Second
+	streamRetryInterval     = 5 * time.Second
+	streamRetryResponseWait = 3 * time.Second
+	playbackConfirmDelay    = 2 * time.Second
 )
 
 // sleepModeIndicator is a substring the camera firmware includes in its
@@ -142,7 +147,7 @@ func (c *CameraClient) Stop() {
 	go func() { c.wg.Wait(); close(ch) }()
 	select {
 	case <-ch:
-	case <-time.After(5 * time.Second):
+	case <-time.After(stopTimeout):
 		log.Printf("[camera:%s] stop: timed out waiting for goroutines", c.cameraUID)
 	}
 }
@@ -212,7 +217,7 @@ func (c *CameraClient) connect() error {
 
 	dialer := websocket.Dialer{
 		TLSClientConfig:  &tls.Config{},
-		HandshakeTimeout: 10 * time.Second,
+		HandshakeTimeout: wsHandshakeTimeout,
 	}
 
 	conn, _, err := dialer.DialContext(ctx, url, header)
@@ -656,7 +661,7 @@ func (c *CameraClient) streamRetryLoop() {
 		select {
 		case <-c.done:
 			return
-		case <-time.After(5 * time.Second):
+		case <-time.After(streamRetryInterval):
 		}
 
 		c.streamRetryMu.Lock()
@@ -675,7 +680,7 @@ func (c *CameraClient) streamRetryLoop() {
 		select {
 		case <-c.done:
 			return
-		case <-time.After(3 * time.Second):
+		case <-time.After(streamRetryResponseWait):
 		}
 
 		c.streamRetryMu.Lock()
@@ -773,7 +778,7 @@ func (c *CameraClient) SetPlaybackTrack(on bool, trackName string) error {
 	if err != nil {
 		return err
 	}
-	c.delayedAction(2*time.Second, func() {
+	c.delayedAction(playbackConfirmDelay, func() {
 		if err := c.RequestPlayback(); err != nil {
 			log.Printf("[camera:%s] failed to query playback state: %v", c.cameraUID, err)
 		}
@@ -814,7 +819,7 @@ func (c *CameraClient) SetSleepMode(on bool) error {
 		c.onSettings(settings)
 	}
 	if err == nil && !on {
-		c.delayedAction(2*time.Second, func() {
+		c.delayedAction(playbackConfirmDelay, func() {
 			log.Printf("[camera:%s] sleep mode off — restarting stream", c.cameraUID)
 			c.startStreaming()
 		})

@@ -154,7 +154,7 @@ func (m *Manager) Stop() {
 	go func() { wg.Wait(); close(ch) }()
 	select {
 	case <-ch:
-	case <-time.After(5 * time.Second):
+	case <-time.After(managerStopTimeout):
 		log.Printf("[manager] stop: timed out waiting for camera clients")
 	}
 }
@@ -252,7 +252,7 @@ func captureFrameFromStream(sub StreamSubscriber, cameraUID string) ([]byte, err
 	defer unsub()
 
 	var spsNALUs, ppsNALUs [][]byte
-	timeout := time.After(10 * time.Second)
+	timeout := time.After(snapshotWaitTimeout)
 
 	for {
 		select {
@@ -628,10 +628,12 @@ const (
 	alertTypeTemperature = "TEMPERATURE"
 	alertTypeHumidity    = "HUMIDITY"
 
-	messagePollInterval      = 15 * time.Second
-	streamWatchdogInterval   = 30 * time.Second
-	streamWatchdogGrace      = 15 * time.Second
-	streamWatchdogCooldown   = 60 * time.Second
+	messagePollInterval    = 15 * time.Second
+	streamWatchdogInterval = 30 * time.Second
+	streamWatchdogGrace    = 15 * time.Second
+	streamWatchdogCooldown = 60 * time.Second
+	managerStopTimeout     = 5 * time.Second
+	snapshotWaitTimeout    = 10 * time.Second
 )
 
 func (m *Manager) messagePollLoop() {

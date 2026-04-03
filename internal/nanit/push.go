@@ -19,6 +19,9 @@ const (
 	nanitFirebaseApiKey    = "AIzaSyDcp8pEeQBxMMGaiNlNIfS10IaDklF_h5E"
 	nanitFirebaseAppId     = "1:25705829844:android:83a90cd56c7431e0"
 	nanitFirebaseProjectId = "nanit-144706"
+	pushStopTimeout        = 3 * time.Second
+	fcmReconnectDelay      = 5 * time.Second
+	staleMessageAge        = 60 * time.Second
 )
 
 type PushCredentials struct {
@@ -113,7 +116,7 @@ func (p *PushReceiver) Stop() {
 	go func() { p.wg.Wait(); close(ch) }()
 	select {
 	case <-ch:
-	case <-time.After(3 * time.Second):
+	case <-time.After(pushStopTimeout):
 		log.Println("[push] stop: timed out waiting for FCM listener")
 	}
 }
@@ -174,7 +177,7 @@ func (p *PushReceiver) registerWithNanit(creds *PushCredentials) error {
 	}
 
 	url := apiBase + "/devices/android"
-	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(p.tokenMgr.Context(), "POST", url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return err
 	}
@@ -230,7 +233,7 @@ func (p *PushReceiver) listenLoop() {
 			select {
 			case <-p.stopCh:
 				return
-			case <-time.After(5 * time.Second):
+			case <-time.After(fcmReconnectDelay):
 			}
 		}
 	}
@@ -316,7 +319,7 @@ func (p *PushReceiver) parseAndDispatch(data []byte) {
 	}
 
 	age := time.Since(time.Unix(int64(notif.Time), 0))
-	if age > 60*time.Second {
+	if age > staleMessageAge {
 		p.staleCount++
 		return
 	}

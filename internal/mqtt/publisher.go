@@ -11,6 +11,11 @@ import (
 	"nanit-bridge/internal/baby"
 )
 
+const (
+	mqttKeepalive    = 30 * time.Second
+	mqttConnectRetry = 5 * time.Second
+)
+
 type Config struct {
 	BrokerURL string
 	Username  string
@@ -35,10 +40,10 @@ func NewPublisher(cfg Config) (*Publisher, error) {
 	opts := paho.NewClientOptions().
 		AddBroker(cfg.BrokerURL).
 		SetClientID(fmt.Sprintf("%s-bridge", cfg.Prefix)).
-		SetKeepAlive(30 * time.Second).
+		SetKeepAlive(mqttKeepalive).
 		SetAutoReconnect(true).
 		SetConnectRetry(true).
-		SetConnectRetryInterval(5 * time.Second).
+		SetConnectRetryInterval(mqttConnectRetry).
 		SetConnectionLostHandler(func(_ paho.Client, err error) {
 			log.Printf("[mqtt] connection lost: %v", err)
 		}).
@@ -104,11 +109,11 @@ func (p *Publisher) PublishDiscovery(babyUID, name string) {
 	}
 
 	sensors := []struct {
-		name       string
-		key        string
-		unit       string
-		devClass   string
-		icon       string
+		name     string
+		key      string
+		unit     string
+		devClass string
+		icon     string
 	}{
 		{"Temperature", "temperature", "°C", "temperature", ""},
 		{"Humidity", "humidity", "%", "humidity", ""},
@@ -117,12 +122,12 @@ func (p *Publisher) PublishDiscovery(babyUID, name string) {
 
 	for _, s := range sensors {
 		config := map[string]interface{}{
-			"name":                  fmt.Sprintf("%s %s", name, s.name),
-			"state_topic":          fmt.Sprintf("%s/%s/%s", p.prefix, babyUID, s.key),
-			"unique_id":            fmt.Sprintf("%s_%s", deviceID, s.key),
-			"device":               device,
-			"device_class":         s.devClass,
-			"unit_of_measurement":  s.unit,
+			"name":                fmt.Sprintf("%s %s", name, s.name),
+			"state_topic":         fmt.Sprintf("%s/%s/%s", p.prefix, babyUID, s.key),
+			"unique_id":           fmt.Sprintf("%s_%s", deviceID, s.key),
+			"device":              device,
+			"device_class":        s.devClass,
+			"unit_of_measurement": s.unit,
 		}
 
 		topic := fmt.Sprintf("homeassistant/sensor/%s_%s/config", deviceID, s.key)

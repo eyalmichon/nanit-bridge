@@ -73,6 +73,9 @@ func main() {
 	}
 
 	tokenMgr := nanit.NewTokenManager(cfg.NanitEmail, cfg.NanitPassword, cfg.SessionFile)
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+	tokenMgr.SetContext(appCtx)
 
 	if err := tokenMgr.LoadSession(); err != nil {
 		log.Printf("warning: could not load session: %v", err)
@@ -168,6 +171,7 @@ func main() {
 	go func() { <-sig; log.Println("forced exit"); os.Exit(1) }()
 
 	log.Println("shutting down...")
+	appCancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := apiServer.Stop(ctx); err != nil {
