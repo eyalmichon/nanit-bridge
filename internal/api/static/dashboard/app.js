@@ -179,7 +179,13 @@
     }
     emptyState.style.display = 'none';
     babiesEl.querySelectorAll('.baby-card').forEach(function(el) {
-      if (!babies[el.dataset.uid]) { destroyPlayer(el.dataset.uid); el.remove(); }
+      if (!babies[el.dataset.uid]) {
+        destroyPlayer(el.dataset.uid);
+        el.querySelectorAll('.env-num').forEach(function(num) {
+          if (num._rollAnim) { cancelAnimationFrame(num._rollAnim); num._rollAnim = null; }
+        });
+        el.remove();
+      }
     });
     uids.forEach(function(uid) { updateCard(uid, null); });
   }
@@ -314,6 +320,19 @@
     el.classList.add('flash');
   }
 
+  function rollValue(el, from, to, decimals, duration) {
+    if (el._rollAnim) cancelAnimationFrame(el._rollAnim);
+    var start = performance.now();
+    var diff = to - from;
+    (function frame(now) {
+      var t = Math.min((now - start) / duration, 1);
+      var ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      el.textContent = (from + diff * ease).toFixed(decimals);
+      if (t < 1) el._rollAnim = requestAnimationFrame(frame);
+      else el._rollAnim = null;
+    })(start);
+  }
+
   function ensureCard(uid) {
     var card = babiesEl.querySelector('.baby-card[data-uid="' + uid + '"]');
     if (!card) {
@@ -430,24 +449,30 @@
     var lightStr = fmtNum(s.light, 0);
     var ps = prevSensors[uid];
 
-    var tempValEl = document.getElementById('env-temp-' + uid);
-    var humidValEl = document.getElementById('env-humidity-' + uid);
-    var lightValEl = document.getElementById('env-light-' + uid);
+    var tempNumEl = document.getElementById('env-temp-' + uid).querySelector('.env-num');
+    var humidNumEl = document.getElementById('env-humidity-' + uid).querySelector('.env-num');
+    var lightNumEl = document.getElementById('env-light-' + uid).querySelector('.env-num');
 
     if (!ps || ps.temp !== tempStr) {
-      tempValEl.querySelector('.env-num').textContent = tempStr;
-      if (ps) flashElement(tempValEl);
+      if (ps && ps.tempRaw && s.temperature) rollValue(tempNumEl, ps.tempRaw, s.temperature, 1, 500);
+      else tempNumEl.textContent = tempStr;
+      if (ps) flashElement(tempNumEl.parentNode);
     }
     if (!ps || ps.humidity !== humidStr) {
-      humidValEl.querySelector('.env-num').textContent = humidStr;
-      if (ps) flashElement(humidValEl);
+      if (ps && ps.humidRaw && s.humidity) rollValue(humidNumEl, ps.humidRaw, s.humidity, 1, 500);
+      else humidNumEl.textContent = humidStr;
+      if (ps) flashElement(humidNumEl.parentNode);
     }
     if (!ps || ps.light !== lightStr) {
-      lightValEl.querySelector('.env-num').textContent = lightStr;
-      if (ps) flashElement(lightValEl);
+      if (ps && ps.lightRaw && s.light) rollValue(lightNumEl, ps.lightRaw, s.light, 0, 500);
+      else lightNumEl.textContent = lightStr;
+      if (ps) flashElement(lightNumEl.parentNode);
     }
 
-    prevSensors[uid] = { temp: tempStr, humidity: humidStr, light: lightStr };
+    prevSensors[uid] = {
+      temp: tempStr, humidity: humidStr, light: lightStr,
+      tempRaw: s.temperature || 0, humidRaw: s.humidity || 0, lightRaw: s.light || 0
+    };
 
     document.getElementById('env-dot-' + uid).className = 'env-dot ' + (s.is_night ? 'night' : 'day');
     document.getElementById('env-daynight-text-' + uid).textContent = s.is_night ? 'Nighttime' : 'Daytime';
@@ -774,7 +799,33 @@
     }
 
     var brStatusSync = document.getElementById('ctrl-br-status-' + uid);
-    if (brStatusSync) brStatusSync.innerHTML = breathingStatusHtml(d.brActive, d.brCalibrating, d.brBpm, d.brStatusText);
+    if (brStatusSync) {
+      var brKey = (d.brActive ? '1' : '0') + '|' + (d.brCalibrating ? '1' : '0') + '|' + d.brBpm;
+      if (brStatusSync.dataset.state !== brKey) {
+        var prevBrKey = brStatusSync.dataset.state || '';
+        var prevRunning = prevBrKey.indexOf('1|0|') === 0 && prevBrKey !== '1|0|0';
+        var nowRunning = d.brActive && !d.brCalibrating && d.brBpm > 0;
+
+        if (prevRunning && nowRunning) {
+          var prevBpm = parseInt(prevBrKey.split('|')[2], 10);
+          var ringEl = brStatusSync.querySelector('.br-ring');
+          var waveEl = brStatusSync.querySelector('.br-wave');
+          var bpmEl = brStatusSync.querySelector('.br-viz-bpm');
+          var dur = (60 / d.brBpm).toFixed(2);
+          if (ringEl) ringEl.style.setProperty('--breath-dur', dur + 's');
+          if (waveEl) waveEl.style.setProperty('--wave-dur', (dur * 1.2).toFixed(2) + 's');
+          if (bpmEl) {
+            rollValue(bpmEl, prevBpm, d.brBpm, 0, 400);
+            flashElement(bpmEl);
+          }
+        } else {
+          brStatusSync.innerHTML = breathingStatusHtml(d.brActive, d.brCalibrating, d.brBpm, d.brStatusText);
+          var newBpmEl = brStatusSync.querySelector('.br-viz-bpm');
+          if (newBpmEl) newBpmEl.addEventListener('animationend', function() { this.classList.remove('flash'); });
+        }
+        brStatusSync.dataset.state = brKey;
+      }
+    }
 
     var sleepSync = document.getElementById('ctrl-sleep-' + uid);
     if (sleepSync) sleepSync.classList.toggle('on', d.sleepMode);
@@ -795,14 +846,25 @@
 
     var alertGrid = document.getElementById('alert-grid-' + uid);
     if (alertGrid) {
-      alertGrid.innerHTML =
-        alertChip('Cry', d.s.cry_detected, d.s.cry_detected_at) +
-        alertChip('Sound', d.s.sound_alert, d.s.sound_alert_at) +
-        alertChip('Motion', d.s.motion_alert, d.s.motion_alert_at);
+      var alertKey = (d.s.cry_detected ? '1' : '0') + '|' + (d.s.sound_alert ? '1' : '0') + '|' + (d.s.motion_alert ? '1' : '0') +
+        '|' + (d.s.cry_detected_at || '') + '|' + (d.s.sound_alert_at || '') + '|' + (d.s.motion_alert_at || '');
+      if (alertGrid.dataset.state !== alertKey) {
+        alertGrid.dataset.state = alertKey;
+        alertGrid.innerHTML =
+          alertChip('Cry', d.s.cry_detected, d.s.cry_detected_at) +
+          alertChip('Sound', d.s.sound_alert, d.s.sound_alert_at) +
+          alertChip('Motion', d.s.motion_alert, d.s.motion_alert_at);
+      }
     }
 
     var camInfo = document.getElementById('camera-info-' + uid);
-    if (camInfo) camInfo.innerHTML = cameraInfoHtml(d.cam);
+    if (camInfo) {
+      var camKey = (d.cam.firmware_version || '') + '|' + (d.cam.hardware_version || '') + '|' + (d.cam.mounting_mode || '');
+      if (camInfo.dataset.state !== camKey) {
+        camInfo.dataset.state = camKey;
+        camInfo.innerHTML = cameraInfoHtml(d.cam);
+      }
+    }
   }
 
   // ── Video player ───────────────────────────────────────
@@ -828,22 +890,24 @@
     player.attachMediaElement(videoEl);
     player.load();
     player.play();
+    var errorTimer = null;
     player.on(mpegts.Events.ERROR, function() {
-      setTimeout(function() {
+      errorTimer = setTimeout(function() {
+        errorTimer = null;
         destroyPlayer(uid);
         if (babies[uid] && babies[uid].stream === 'active') startPlayer(uid);
       }, 3000);
     });
     var stallCount = 0;
-    videoEl.addEventListener('stalled', function onStall() {
+    var onStall = function() {
       stallCount++;
       if (stallCount > 3) {
-        videoEl.removeEventListener('stalled', onStall);
         destroyPlayer(uid);
         if (babies[uid] && babies[uid].stream === 'active') startPlayer(uid);
       }
-    });
-    players[uid] = player;
+    };
+    videoEl.addEventListener('stalled', onStall);
+    players[uid] = { player: player, errorTimer: function() { return errorTimer; }, onStall: onStall, videoEl: videoEl };
   }
 
   document.addEventListener('visibilitychange', function() {
@@ -864,8 +928,12 @@
   });
 
   function destroyPlayer(uid) {
-    if (players[uid]) {
-      try { players[uid].pause(); players[uid].unload(); players[uid].detachMediaElement(); players[uid].destroy(); } catch(e) {}
+    var p = players[uid];
+    if (p) {
+      var timer = p.errorTimer();
+      if (timer) clearTimeout(timer);
+      if (p.videoEl && p.onStall) p.videoEl.removeEventListener('stalled', p.onStall);
+      try { p.player.pause(); p.player.unload(); p.player.detachMediaElement(); p.player.destroy(); } catch(e) {}
       delete players[uid];
     }
   }
@@ -888,10 +956,32 @@
     return '<div class="ctrl-row"><span class="ctrl-label">' + label + '</span><span class="ctrl-val">' + esc(value) + '</span></div>';
   }
 
+  var BR_WAVE_SVG =
+    '<svg viewBox="0 0 200 40" preserveAspectRatio="none">' +
+      '<path d="M0 20 Q25 0 50 20 T100 20 T150 20 T200 20" fill="none" stroke="currentColor" stroke-width="3"/>' +
+    '</svg>' +
+    '<svg viewBox="0 0 200 40" preserveAspectRatio="none">' +
+      '<path d="M0 22 Q25 4 50 22 T100 22 T150 22 T200 22" fill="none" stroke="currentColor" stroke-width="2"/>' +
+    '</svg>';
+
   function breathingStatusHtml(active, calibrating, bpm, statusText) {
     if (!active) return '<span class="br-detail">Off</span>';
-    if (calibrating || bpm === 0) return '<span class="br-detail" style="color:var(--amber)">' + statusText + '</span>';
-    return '<span class="br-bpm">' + bpm + '</span><span class="br-bpm-unit"> breaths/min</span>';
+    if (calibrating || bpm === 0) {
+      return '<div class="br-viz">' +
+        '<div class="br-ring calibrating">' +
+          '<span class="br-viz-label">' + statusText + '</span>' +
+        '</div>' +
+      '</div>';
+    }
+    var dur = (60 / bpm).toFixed(2);
+    var waveDur = (dur * 1.2).toFixed(2);
+    return '<div class="br-viz">' +
+      '<div class="br-ring" style="--breath-dur:' + dur + 's">' +
+        '<div class="br-wave" style="--wave-dur:' + waveDur + 's">' + BR_WAVE_SVG + '</div>' +
+        '<span class="br-viz-bpm">' + bpm + '</span>' +
+        '<span class="br-viz-unit">breaths/min</span>' +
+      '</div>' +
+    '</div>';
   }
 
   function alertChip(label, detected, detectedAt) {
@@ -941,23 +1031,24 @@
 
   function appendLogLine(line) {
     logLineCount++;
-    logContent.textContent += line + '\n';
-    // Trim if too many lines
-    if (logLineCount > LOG_MAX) {
-      var text = logContent.textContent;
-      var cut = text.indexOf('\n', text.length - LOG_MAX * 80);
-      if (cut > 0) { logContent.textContent = text.substring(cut + 1); }
-      logLineCount = LOG_MAX;
+    logContent.appendChild(document.createTextNode(line + '\n'));
+    while (logContent.childNodes.length > LOG_MAX) {
+      logContent.removeChild(logContent.firstChild);
+      logLineCount--;
     }
     logBadge.textContent = logLineCount + ' lines';
-    // Auto-scroll if near bottom
     var atBottom = logBody.scrollHeight - logBody.scrollTop - logBody.clientHeight < 60;
     if (atBottom) logBody.scrollTop = logBody.scrollHeight;
   }
 
   function appendLogLines(lines) {
+    logContent.textContent = '';
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < lines.length; i++) {
+      frag.appendChild(document.createTextNode(lines[i] + '\n'));
+    }
+    logContent.appendChild(frag);
     logLineCount = lines.length;
-    logContent.textContent = lines.length ? (lines.join('\n') + '\n') : '';
     logBadge.textContent = logLineCount + ' lines';
     logBody.scrollTop = logBody.scrollHeight;
   }

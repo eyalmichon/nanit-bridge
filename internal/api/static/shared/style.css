@@ -313,7 +313,7 @@ header h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; }
 }
 .seg-btn {
   border: none; background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-dim);
   font-size: 0.7rem; font-weight: 600;
   padding: 3px 10px;
   border-radius: 7px;
@@ -377,15 +377,104 @@ select.ctrl-select:focus { outline: 1px solid var(--accent); }
 }
 .sens-label { font-size: 0.6rem; color: var(--muted); flex-shrink: 0; }
 
-/* ── Breathing status ───────────────────────────────────── */
+/* ── Breathing visualization ────────────────────────────── */
 
-.br-status { display: flex; align-items: center; gap: 0.5rem; }
-.br-bpm {
-  font-size: 1.5rem; font-weight: 700;
-  font-variant-numeric: tabular-nums; line-height: 1;
+.br-detail { font-size: 0.75rem; color: var(--text-dim); }
+
+.br-viz {
+  display: flex; align-items: center; justify-content: center;
+  padding: 0.6rem 0 0.2rem;
 }
-.br-bpm-unit { font-size: 0.65rem; color: var(--muted); }
-.br-detail   { font-size: 0.75rem; color: var(--text-dim); }
+
+.br-ring {
+  position: relative;
+  width: 90px; height: 90px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.br-ring::before {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  animation: breatheRing var(--breath-dur, 2s) ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes breatheRing {
+  0%, 100% { opacity: 0.4; box-shadow: 0 0 8px var(--accent-dim); transform: scale(0.97); }
+  50%      { opacity: 1;   box-shadow: 0 0 20px var(--accent-dim), 0 0 36px rgba(99,102,241,0.08); transform: scale(1); }
+}
+
+.br-ring.calibrating::before {
+  border: 2px dashed var(--amber);
+  animation: calibrateSpin 6s linear infinite;
+  box-shadow: none;
+}
+
+@keyframes calibrateSpin {
+  from { transform: rotate(0deg); opacity: 0.7; }
+  to   { transform: rotate(360deg); opacity: 0.7; }
+}
+
+.br-wave {
+  position: absolute; inset: 0;
+  overflow: hidden; border-radius: 50%;
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.br-wave svg {
+  position: absolute;
+  bottom: 28%; left: 0;
+  height: 40%; width: 200%;
+  animation: waveScroll var(--wave-dur, 3s) linear infinite;
+  stroke: var(--accent); fill: none;
+}
+
+.br-wave svg:nth-child(2) {
+  opacity: 0.5;
+  bottom: 24%;
+  animation-duration: calc(var(--wave-dur, 3s) * 1.5);
+  animation-direction: reverse;
+}
+
+@keyframes waveScroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+@keyframes numSlideIn {
+  from { transform: translateY(5px); opacity: 0; filter: blur(2px); }
+  to   { transform: translateY(0); opacity: 1; filter: blur(0); }
+}
+
+.br-viz-bpm {
+  font-size: 1.6rem; font-weight: 700;
+  font-variant-numeric: tabular-nums; line-height: 1;
+  position: relative; z-index: 1;
+  animation: numSlideIn 0.35s ease-out;
+}
+
+.br-viz-bpm.flash {
+  animation: sensorFlash 0.5s ease-out;
+}
+
+.br-viz-unit {
+  font-size: 0.55rem; color: var(--muted);
+  position: relative; z-index: 1;
+  margin-top: 0.1rem;
+  animation: numSlideIn 0.35s ease-out 0.05s both;
+}
+
+.br-viz-label {
+  font-size: 0.6rem; color: var(--muted);
+  position: relative; z-index: 1;
+  text-align: center;
+}
 
 /* ── Misc ───────────────────────────────────────────────── */
 
