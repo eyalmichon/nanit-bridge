@@ -341,8 +341,23 @@ func (m *Manager) SetPlayback(babyUID string, on bool) error {
 	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetPlayback(on) })
 }
 
-func (m *Manager) SetPlaybackTrack(babyUID string, trackName string) error {
-	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetPlaybackTrack(true, trackName) })
+func (m *Manager) SetPlaybackTrack(babyUID string, displayName string) error {
+	fileName := m.resolveTrackFileName(babyUID, displayName)
+	return m.withClient(babyUID, func(c *nanit.CameraClient) error { return c.SetPlaybackTrack(true, fileName) })
+}
+
+func (m *Manager) resolveTrackFileName(babyUID, displayName string) string {
+	state := m.GetState(babyUID)
+	if state == nil {
+		return displayName
+	}
+	snap := state.Snapshot()
+	for _, t := range snap.Controls.Soundtracks {
+		if t.Name == displayName {
+			return t.FileName
+		}
+	}
+	return displayName
 }
 
 func (m *Manager) SetVolume(babyUID string, level int) error {
@@ -439,15 +454,14 @@ func (m *Manager) startBaby(b nanit.Baby) {
 		state.UpdateControls(func(c *ControlState) {
 			c.PlaybackActive = playback.GetStatus() == pb.Playback_STARTED
 			if playback.GetCurrentTrack() != nil {
-				c.CurrentTrack = playback.GetCurrentTrack().GetName()
-			} else if !c.PlaybackActive {
-				c.CurrentTrack = ""
+				c.CurrentTrack = TrimTrackExt(playback.GetCurrentTrack().GetName())
 			}
 			if len(playback.GetSoundtracks()) > 0 {
 				c.Soundtracks = make([]SoundtrackInfo, len(playback.GetSoundtracks()))
 				for i, t := range playback.GetSoundtracks() {
 					c.Soundtracks[i] = SoundtrackInfo{
-						Name:     t.GetName(),
+						Name:     TrimTrackExt(t.GetName()),
+						FileName: t.GetName(),
 						Category: int(t.GetCategory()),
 					}
 				}
@@ -460,7 +474,8 @@ func (m *Manager) startBaby(b nanit.Baby) {
 			c.Soundtracks = make([]SoundtrackInfo, len(tracks))
 			for i, t := range tracks {
 				c.Soundtracks[i] = SoundtrackInfo{
-					Name:     t.GetName(),
+					Name:     TrimTrackExt(t.GetName()),
+					FileName: t.GetName(),
 					Category: int(t.GetCategory()),
 				}
 			}

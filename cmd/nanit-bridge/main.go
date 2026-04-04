@@ -368,59 +368,41 @@ func maskToken(s string) string {
 	return s[:4] + "..." + s[len(s)-4:]
 }
 
+var boolCommands = map[string]func(*baby.Manager, string, bool) error{
+	"night_light":  (*baby.Manager).SetNightLight,
+	"playback":     (*baby.Manager).SetPlayback,
+	"sleep_mode":   (*baby.Manager).SetSleepMode,
+	"status_light": (*baby.Manager).SetStatusLight,
+	"mic_mute":     (*baby.Manager).SetMicMute,
+}
+
+var numberCommands = map[string]func(*baby.Manager, string, int) error{
+	"volume":                 (*baby.Manager).SetVolume,
+	"night_light_brightness": (*baby.Manager).SetNightLightBrightness,
+	"night_light_timeout":    (*baby.Manager).SetNightLightTimeout,
+	"sound_sensitivity":      (*baby.Manager).SetSoundSensitivity,
+	"motion_sensitivity":     (*baby.Manager).SetMotionSensitivity,
+}
+
 func dispatchMQTTCommand(mgr *baby.Manager, babyUID, key, payload string) error {
+	if fn, ok := boolCommands[key]; ok {
+		v, err := parseOnOff(payload)
+		if err != nil {
+			return err
+		}
+		return fn(mgr, babyUID, v)
+	}
+
+	if fn, ok := numberCommands[key]; ok {
+		r := mqtt.NumberRanges[key]
+		v, err := parseIntRange(payload, r[0], r[1])
+		if err != nil {
+			return err
+		}
+		return fn(mgr, babyUID, v)
+	}
+
 	switch key {
-	case "night_light":
-		v, err := parseOnOff(payload)
-		if err != nil {
-			return err
-		}
-		return mgr.SetNightLight(babyUID, v)
-
-	case "night_light_brightness":
-		v, err := parseIntRange(payload, 0, 100)
-		if err != nil {
-			return err
-		}
-		return mgr.SetNightLightBrightness(babyUID, v)
-
-	case "night_light_timeout":
-		v, err := strconv.Atoi(payload)
-		if err != nil {
-			return fmt.Errorf("invalid integer: %s", payload)
-		}
-		if v < 0 {
-			return fmt.Errorf("timeout must be >= 0, got %d", v)
-		}
-		return mgr.SetNightLightTimeout(babyUID, v)
-
-	case "volume":
-		v, err := parseIntRange(payload, 0, 100)
-		if err != nil {
-			return err
-		}
-		return mgr.SetVolume(babyUID, v)
-
-	case "playback":
-		v, err := parseOnOff(payload)
-		if err != nil {
-			return err
-		}
-		return mgr.SetPlayback(babyUID, v)
-
-	case "select_track":
-		if payload == "" {
-			return fmt.Errorf("empty track name")
-		}
-		return mgr.SetPlaybackTrack(babyUID, payload)
-
-	case "sleep_mode":
-		v, err := parseOnOff(payload)
-		if err != nil {
-			return err
-		}
-		return mgr.SetSleepMode(babyUID, v)
-
 	case "night_vision":
 		m, err := parseNightVision(payload)
 		if err != nil {
@@ -428,19 +410,11 @@ func dispatchMQTTCommand(mgr *baby.Manager, babyUID, key, payload string) error 
 		}
 		return mgr.SetNightVision(babyUID, m)
 
-	case "status_light":
-		v, err := parseOnOff(payload)
-		if err != nil {
-			return err
+	case "select_track":
+		if payload == "" {
+			return fmt.Errorf("empty track name")
 		}
-		return mgr.SetStatusLight(babyUID, v)
-
-	case "mic_mute":
-		v, err := parseOnOff(payload)
-		if err != nil {
-			return err
-		}
-		return mgr.SetMicMute(babyUID, v)
+		return mgr.SetPlaybackTrack(babyUID, payload)
 
 	case "breathing_monitoring":
 		v, err := parseOnOff(payload)

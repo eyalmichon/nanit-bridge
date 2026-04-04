@@ -28,6 +28,40 @@ type Config struct {
 // CommandHandler is called when an MQTT command is received on {prefix}/{babyUID}/{key}/set.
 type CommandHandler func(babyUID, key, payload string)
 
+// NumberEntity defines a numeric HA entity with its valid range.
+// Exported so command dispatch can read ranges from the same source.
+type NumberEntity struct {
+	Name string
+	Key  string
+	Min  int
+	Max  int
+	Step int
+	Unit string
+	Icon string
+}
+
+// NumberEntities lists all HA number slider entities and their valid ranges.
+// Used by both discovery (publisher) and command validation (main.go dispatch).
+var NumberEntities = []NumberEntity{
+	{"Volume", "volume", 0, 100, 1, "%", "mdi:volume-high"},
+	{"Night Light Timer", "night_light_timeout", 0, 900, 60, "s", "mdi:timer-outline"},
+	{"Sound Sensitivity", "sound_sensitivity", 2, 9, 1, "", "mdi:ear-hearing"},
+	{"Motion Sensitivity", "motion_sensitivity", 10000, 250000, 10000, "", "mdi:motion-sensor"},
+}
+
+// NumberRanges maps command key -> (min, max) for all numeric commands,
+// including command-only keys that are not standalone HA number entities
+// (e.g. night_light_brightness is part of the light entity).
+var NumberRanges map[string][2]int
+
+func init() {
+	NumberRanges = make(map[string][2]int, len(NumberEntities)+1)
+	for _, n := range NumberEntities {
+		NumberRanges[n.Key] = [2]int{n.Min, n.Max}
+	}
+	NumberRanges["night_light_brightness"] = [2]int{0, 100}
+}
+
 type Publisher struct {
 	client     paho.Client
 	prefix     string
@@ -160,6 +194,8 @@ func (p *Publisher) PublishState(babyUID, name string, state *baby.State) {
 	p.pubDedup(babyUID, "mic_mute", onOffStr(snap.Controls.MicMute))
 	p.pubDedup(babyUID, "breathing_active", onOffStr(snap.Controls.Breathing.Active))
 	p.pubDedup(babyUID, "breathing_bpm", fmt.Sprintf("%d", snap.Controls.Breathing.BreathsPerMin))
+	p.pubDedup(babyUID, "sound_sensitivity", fmt.Sprintf("%d", snap.Controls.SoundSensitivity))
+	p.pubDedup(babyUID, "motion_sensitivity", fmt.Sprintf("%d", snap.Controls.MotionSensitivity))
 
 	// Re-publish select_track discovery when the soundtrack list changes.
 	if len(snap.Controls.Soundtracks) > 0 {
@@ -207,15 +243,14 @@ func (p *Publisher) PublishDiscovery(babyUID, name string) {
 	for _, s := range sensors {
 		config := mergeMaps(map[string]interface{}{
 			"name":                s.name,
-			"state_topic":         fmt.Sprintf("%s/%s/%s", p.prefix, babyUID, s.key),
+			"state_topic":         p.stateTopic(babyUID, s.key),
 			"unique_id":           fmt.Sprintf("%s_%s", deviceID, s.key),
 			"device":              device,
 			"device_class":        s.devClass,
 			"unit_of_measurement": s.unit,
 		}, avail)
 
-		topic := fmt.Sprintf("homeassistant/sensor/%s_%s/config", deviceID, s.key)
-		p.pubJSON(topic, config)
+		p.pubJSON(p.discoveryTopic("sensor", deviceID, s.key), config)
 	}
 
 	// --- Binary sensors ---
@@ -239,7 +274,7 @@ func (p *Publisher) PublishDiscovery(babyUID, name string) {
 	for _, s := range binarySensors {
 		config := map[string]interface{}{
 			"name":        s.name,
-			"state_topic": fmt.Sprintf("%s/%s/%s", p.prefix, babyUID, s.key),
+			"state_topic": p.stateTopic(babyUID, s.key),
 			"unique_id":   fmt.Sprintf("%s_%s", deviceID, s.key),
 			"device":      device,
 			"payload_on":  s.payloadOn,
@@ -250,19 +285,18 @@ func (p *Publisher) PublishDiscovery(babyUID, name string) {
 			mergeMaps(config, avail)
 		}
 
-		topic := fmt.Sprintf("homeassistant/binary_sensor/%s_%s/config", deviceID, s.key)
-		p.pubJSON(topic, config)
+		p.pubJSON(p.discoveryTopic("binary_sensor", deviceID, s.key), config)
 	}
 
 	// --- Light: Night Light (on/off + brightness) ---
 
-	p.pubJSON(fmt.Sprintf("homeassistant/light/%s_night_light/config", deviceID), mergeMaps(map[string]interface{}{
+	p.pubJSON(p.discoveryTopic("light", deviceID, "night_light"), mergeMaps(map[string]interface{}{
 		"name":                     "Night Light",
 		"unique_id":                fmt.Sprintf("%s_night_light", deviceID),
-		"command_topic":            fmt.Sprintf("%s/%s/night_light/set", p.prefix, babyUID),
-		"state_topic":              fmt.Sprintf("%s/%s/night_light", p.prefix, babyUID),
-		"brightness_command_topic": fmt.Sprintf("%s/%s/night_light_brightness/set", p.prefix, babyUID),
-		"brightness_state_topic":   fmt.Sprintf("%s/%s/night_light_brightness", p.prefix, babyUID),
+		"command_topic":            p.cmdTopic(babyUID, "night_light"),
+		"state_topic":              p.stateTopic(babyUID, "night_light"),
+		"brightness_command_topic": p.cmdTopic(babyUID, "night_light_brightness"),
+		"brightness_state_topic":   p.stateTopic(babyUID, "night_light_brightness"),
 		"brightness_scale":         100,
 		"payload_on":               "ON",
 		"payload_off":              "OFF",
@@ -289,59 +323,44 @@ func (p *Publisher) PublishDiscovery(babyUID, name string) {
 		config := mergeMaps(map[string]interface{}{
 			"name":          s.name,
 			"unique_id":     fmt.Sprintf("%s_%s", deviceID, s.key),
-			"command_topic": fmt.Sprintf("%s/%s/%s/set", p.prefix, babyUID, s.key),
-			"state_topic":   fmt.Sprintf("%s/%s/%s", p.prefix, babyUID, s.stateKey),
+			"command_topic": p.cmdTopic(babyUID, s.key),
+			"state_topic":   p.stateTopic(babyUID, s.stateKey),
 			"payload_on":    "ON",
 			"payload_off":   "OFF",
 			"icon":          s.icon,
 			"device":        device,
 		}, avail)
 
-		topic := fmt.Sprintf("homeassistant/switch/%s_%s/config", deviceID, s.key)
-		p.pubJSON(topic, config)
+		p.pubJSON(p.discoveryTopic("switch", deviceID, s.key), config)
 	}
 
 	// --- Numbers (sliders) ---
 
-	numbers := []struct {
-		name string
-		key  string
-		min  int
-		max  int
-		step int
-		unit string
-		icon string
-	}{
-		{"Volume", "volume", 0, 100, 1, "%", "mdi:volume-high"},
-		{"Night Light Timer", "night_light_timeout", 0, 900, 60, "s", "mdi:timer-outline"},
-	}
-
-	for _, n := range numbers {
+	for _, n := range NumberEntities {
 		config := mergeMaps(map[string]interface{}{
-			"name":                n.name,
-			"unique_id":           fmt.Sprintf("%s_%s", deviceID, n.key),
-			"command_topic":       fmt.Sprintf("%s/%s/%s/set", p.prefix, babyUID, n.key),
-			"state_topic":         fmt.Sprintf("%s/%s/%s", p.prefix, babyUID, n.key),
-			"min":                 n.min,
-			"max":                 n.max,
-			"step":               n.step,
+			"name":                n.Name,
+			"unique_id":           fmt.Sprintf("%s_%s", deviceID, n.Key),
+			"command_topic":       p.cmdTopic(babyUID, n.Key),
+			"state_topic":         p.stateTopic(babyUID, n.Key),
+			"min":                 n.Min,
+			"max":                 n.Max,
+			"step":               n.Step,
 			"mode":               "slider",
-			"unit_of_measurement": n.unit,
-			"icon":               n.icon,
+			"unit_of_measurement": n.Unit,
+			"icon":               n.Icon,
 			"device":             device,
 		}, avail)
 
-		topic := fmt.Sprintf("homeassistant/number/%s_%s/config", deviceID, n.key)
-		p.pubJSON(topic, config)
+		p.pubJSON(p.discoveryTopic("number", deviceID, n.Key), config)
 	}
 
 	// --- Select: Night Vision ---
 
-	p.pubJSON(fmt.Sprintf("homeassistant/select/%s_night_vision/config", deviceID), mergeMaps(map[string]interface{}{
+	p.pubJSON(p.discoveryTopic("select", deviceID, "night_vision"), mergeMaps(map[string]interface{}{
 		"name":          "Night Vision",
 		"unique_id":     fmt.Sprintf("%s_night_vision", deviceID),
-		"command_topic": fmt.Sprintf("%s/%s/night_vision/set", p.prefix, babyUID),
-		"state_topic":   fmt.Sprintf("%s/%s/night_vision", p.prefix, babyUID),
+		"command_topic": p.cmdTopic(babyUID, "night_vision"),
+		"state_topic":   p.stateTopic(babyUID, "night_vision"),
 		"options":       []string{"off", "auto", "on"},
 		"icon":          "mdi:eye-outline",
 		"device":        device,
@@ -349,10 +368,10 @@ func (p *Publisher) PublishDiscovery(babyUID, name string) {
 
 	// --- Sensor: Breathing BPM ---
 
-	p.pubJSON(fmt.Sprintf("homeassistant/sensor/%s_breathing_bpm/config", deviceID), mergeMaps(map[string]interface{}{
+	p.pubJSON(p.discoveryTopic("sensor", deviceID, "breathing_bpm"), mergeMaps(map[string]interface{}{
 		"name":                "Breathing Rate",
 		"unique_id":           fmt.Sprintf("%s_breathing_bpm", deviceID),
-		"state_topic":         fmt.Sprintf("%s/%s/breathing_bpm", p.prefix, babyUID),
+		"state_topic":         p.stateTopic(babyUID, "breathing_bpm"),
 		"unit_of_measurement": "bpm",
 		"icon":                "mdi:lungs",
 		"device":              device,
@@ -365,15 +384,29 @@ func (p *Publisher) PublishDiscovery(babyUID, name string) {
 func (p *Publisher) publishSelectTrackDiscovery(babyUID, name string, trackNames []string) {
 	deviceID := fmt.Sprintf("nanit_%s", babyUID)
 
-	p.pubJSON(fmt.Sprintf("homeassistant/select/%s_select_track/config", deviceID), mergeMaps(map[string]interface{}{
+	p.pubJSON(p.discoveryTopic("select", deviceID, "select_track"), mergeMaps(map[string]interface{}{
 		"name":          "Sound Track",
 		"unique_id":     fmt.Sprintf("%s_select_track", deviceID),
-		"command_topic": fmt.Sprintf("%s/%s/select_track/set", p.prefix, babyUID),
-		"state_topic":   fmt.Sprintf("%s/%s/current_track", p.prefix, babyUID),
+		"command_topic": p.cmdTopic(babyUID, "select_track"),
+		"state_topic":   p.stateTopic(babyUID, "current_track"),
 		"options":       trackNames,
 		"icon":          "mdi:music-note",
 		"device":        p.deviceBlock(babyUID, name),
 	}, p.availabilityFields(babyUID)))
+}
+
+// --- Topic helpers ---
+
+func (p *Publisher) stateTopic(babyUID, key string) string {
+	return fmt.Sprintf("%s/%s/%s", p.prefix, babyUID, key)
+}
+
+func (p *Publisher) cmdTopic(babyUID, key string) string {
+	return fmt.Sprintf("%s/%s/%s/set", p.prefix, babyUID, key)
+}
+
+func (p *Publisher) discoveryTopic(component, deviceID, key string) string {
+	return fmt.Sprintf("homeassistant/%s/%s_%s/config", component, deviceID, key)
 }
 
 func (p *Publisher) deviceBlock(babyUID, name string) map[string]interface{} {
@@ -387,11 +420,13 @@ func (p *Publisher) deviceBlock(babyUID, name string) map[string]interface{} {
 
 func (p *Publisher) availabilityFields(babyUID string) map[string]interface{} {
 	return map[string]interface{}{
-		"availability_topic":    fmt.Sprintf("%s/%s/ws_alive", p.prefix, babyUID),
+		"availability_topic":    p.stateTopic(babyUID, "ws_alive"),
 		"payload_available":     "true",
 		"payload_not_available": "false",
 	}
 }
+
+// --- Publish helpers ---
 
 func (p *Publisher) pubDedup(babyUID, key, value string) {
 	cacheKey := babyUID + "/" + key
@@ -406,8 +441,7 @@ func (p *Publisher) pubDedup(babyUID, key, value string) {
 }
 
 func (p *Publisher) pub(babyUID, key, value string) {
-	topic := fmt.Sprintf("%s/%s/%s", p.prefix, babyUID, key)
-	p.client.Publish(topic, 0, true, value)
+	p.client.Publish(p.stateTopic(babyUID, key), 0, true, value)
 }
 
 func (p *Publisher) pubJSON(topic string, payload interface{}) {
@@ -418,6 +452,8 @@ func (p *Publisher) pubJSON(topic string, payload interface{}) {
 	}
 	p.client.Publish(topic, 0, true, data)
 }
+
+// --- Formatting helpers ---
 
 func boolStr(b bool) string {
 	if b {

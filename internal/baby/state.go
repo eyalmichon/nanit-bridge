@@ -1,6 +1,7 @@
 package baby
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,7 +22,12 @@ type SensorState struct {
 
 type SoundtrackInfo struct {
 	Name     string `json:"name"`
+	FileName string `json:"file_name"`
 	Category int    `json:"category"`
+}
+
+func TrimTrackExt(name string) string {
+	return strings.TrimSuffix(name, ".wav")
 }
 
 type BreathingState struct {

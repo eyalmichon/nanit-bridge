@@ -142,3 +142,21 @@ func TestAlertAutoClearAfterTTL(t *testing.T) {
 		t.Fatalf("MotionAlert should auto-clear after TTL")
 	}
 }
+
+func TestTrimTrackExt(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"White Noise.wav", "White Noise"},
+		{"Wind.wav", "Wind"},
+		{"Rain", "Rain"},
+		{"Dr. Sleep", "Dr. Sleep"},
+		{"", ""},
+		{"file.wav.wav", "file.wav"},
+	}
+	for _, tc := range tests {
+		if got := TrimTrackExt(tc.in); got != tc.want {
+			t.Errorf("TrimTrackExt(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
