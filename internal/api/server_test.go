@@ -121,6 +121,82 @@ func TestHandleControlValidationAndUnknownAction(t *testing.T) {
 	}
 }
 
+func TestCheckWSOriginSameHost(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin string
+		host   string
+		want   bool
+	}{
+		{"no origin header (non-browser client)", "", "localhost:8080", true},
+		{"exact match", "http://localhost:8080", "localhost:8080", true},
+		{"https scheme", "https://myhost:443", "myhost:443", true},
+		{"case insensitive", "http://LocalHost:8080", "localhost:8080", true},
+		{"host without port", "http://myhost", "myhost", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+			r.Host = tt.host
+			if tt.origin != "" {
+				r.Header.Set("Origin", tt.origin)
+			}
+			if got := checkWSOrigin(r); got != tt.want {
+				t.Fatalf("checkWSOrigin() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckWSOriginCrossOriginRejected(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin string
+		host   string
+	}{
+		{"different host", "http://evil.com", "localhost:8080"},
+		{"different port", "http://localhost:9999", "localhost:8080"},
+		{"subdomain mismatch", "http://sub.localhost:8080", "localhost:8080"},
+		{"malformed origin", "://not-a-url", "localhost:8080"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+			r.Host = tt.host
+			r.Header.Set("Origin", tt.origin)
+			if checkWSOrigin(r) {
+				t.Fatalf("checkWSOrigin() = true, want false for origin=%q host=%q", tt.origin, tt.host)
+			}
+		})
+	}
+}
+
+func TestSecurityHeadersPresent(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := securityHeaders(inner)
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, r)
+
+	csp := rr.Header().Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("Content-Security-Policy header missing")
+	}
+	for _, directive := range []string{"default-src", "script-src", "style-src", "connect-src", "frame-ancestors"} {
+		if !strings.Contains(csp, directive) {
+			t.Errorf("CSP missing directive %q: %s", directive, csp)
+		}
+	}
+
+	xcto := rr.Header().Get("X-Content-Type-Options")
+	if xcto != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want %q", xcto, "nosniff")
+	}
+}
+
 func TestServerStopGracefulShutdown(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

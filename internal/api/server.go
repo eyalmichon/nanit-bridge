@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -26,13 +27,47 @@ import (
 var staticFiles embed.FS
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: checkWSOrigin,
+}
+
+// checkWSOrigin validates that the Origin header matches the Host header,
+// preventing cross-site WebSocket hijacking. Non-browser clients that omit
+// Origin are allowed through since browsers always send it on WS upgrades.
+func checkWSOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	originHost := u.Host
+	if originHost == "" {
+		return false
+	}
+	return strings.EqualFold(originHost, r.Host)
 }
 
 const (
 	logRingSize           = 200
 	httpReadHeaderTimeout = 10 * time.Second
+
+	contentSecurityPolicy = "default-src 'self'; " +
+		"script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; " +
+		"style-src 'self' 'unsafe-inline'; " +
+		"connect-src 'self' ws: wss:; " +
+		"img-src 'self' data:; " +
+		"frame-ancestors 'none'"
 )
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
+}
 
 // LogBroadcaster is an io.Writer that buffers log lines in a ring buffer and
 // broadcasts them to registered listener functions. It can be created before the
@@ -271,7 +306,7 @@ func (s *Server) Start() error {
 		}
 	}))
 
-	handler := s.auth.authMiddleware(mux)
+	handler := securityHeaders(s.auth.authMiddleware(mux))
 
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("[api] dashboard at http://0.0.0.0%s", addr)
