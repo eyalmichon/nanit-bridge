@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -103,6 +104,18 @@ func main() {
 
 	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr, cfg.RTMPToken, cfg.SensorPollSec, cfg.PushCredsFile, rtmpServer)
 
+	if mqttPub != nil {
+		mqttPub.SetCommandHandler(func(babyUID, key, payload string) {
+			if mgr.GetState(babyUID) == nil {
+				log.Printf("[mqtt] command for unknown baby %s: %s=%s", babyUID, key, payload)
+				return
+			}
+			if err := dispatchMQTTCommand(mgr, babyUID, key, payload); err != nil {
+				log.Printf("[mqtt] command error %s/%s: %v", babyUID, key, err)
+			}
+		})
+	}
+
 	rtmpServer.OnPublisherDisconnect(func(streamKey string) {
 		mgr.RestartStream(streamKey)
 	})
@@ -139,7 +152,7 @@ func main() {
 
 	mgr.OnStateChange(func(babyUID string, state *baby.State) {
 		if mqttPub != nil {
-			mqttPub.PublishState(babyUID, state)
+			mqttPub.PublishState(babyUID, state.Name, state)
 		}
 		apiServer.BroadcastState(babyUID, state)
 	})
@@ -353,4 +366,128 @@ func maskToken(s string) string {
 		return "****"
 	}
 	return s[:4] + "..." + s[len(s)-4:]
+}
+
+func dispatchMQTTCommand(mgr *baby.Manager, babyUID, key, payload string) error {
+	switch key {
+	case "night_light":
+		v, err := parseOnOff(payload)
+		if err != nil {
+			return err
+		}
+		return mgr.SetNightLight(babyUID, v)
+
+	case "night_light_brightness":
+		v, err := parseIntRange(payload, 0, 100)
+		if err != nil {
+			return err
+		}
+		return mgr.SetNightLightBrightness(babyUID, v)
+
+	case "night_light_timeout":
+		v, err := strconv.Atoi(payload)
+		if err != nil {
+			return fmt.Errorf("invalid integer: %s", payload)
+		}
+		if v < 0 {
+			return fmt.Errorf("timeout must be >= 0, got %d", v)
+		}
+		return mgr.SetNightLightTimeout(babyUID, v)
+
+	case "volume":
+		v, err := parseIntRange(payload, 0, 100)
+		if err != nil {
+			return err
+		}
+		return mgr.SetVolume(babyUID, v)
+
+	case "playback":
+		v, err := parseOnOff(payload)
+		if err != nil {
+			return err
+		}
+		return mgr.SetPlayback(babyUID, v)
+
+	case "select_track":
+		if payload == "" {
+			return fmt.Errorf("empty track name")
+		}
+		return mgr.SetPlaybackTrack(babyUID, payload)
+
+	case "sleep_mode":
+		v, err := parseOnOff(payload)
+		if err != nil {
+			return err
+		}
+		return mgr.SetSleepMode(babyUID, v)
+
+	case "night_vision":
+		m, err := parseNightVision(payload)
+		if err != nil {
+			return err
+		}
+		return mgr.SetNightVision(babyUID, m)
+
+	case "status_light":
+		v, err := parseOnOff(payload)
+		if err != nil {
+			return err
+		}
+		return mgr.SetStatusLight(babyUID, v)
+
+	case "mic_mute":
+		v, err := parseOnOff(payload)
+		if err != nil {
+			return err
+		}
+		return mgr.SetMicMute(babyUID, v)
+
+	case "breathing_monitoring":
+		v, err := parseOnOff(payload)
+		if err != nil {
+			return err
+		}
+		if v {
+			return mgr.StartBreathingMonitoring(babyUID)
+		}
+		return mgr.StopBreathingMonitoring(babyUID)
+
+	default:
+		return fmt.Errorf("unknown command key: %s", key)
+	}
+}
+
+func parseOnOff(payload string) (bool, error) {
+	switch payload {
+	case "ON":
+		return true, nil
+	case "OFF":
+		return false, nil
+	default:
+		return false, fmt.Errorf("expected ON or OFF, got %q", payload)
+	}
+}
+
+func parseIntRange(payload string, min, max int) (int, error) {
+	v, err := strconv.Atoi(payload)
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer: %s", payload)
+	}
+	if v < min || v > max {
+		return 0, fmt.Errorf("value %d out of range [%d, %d]", v, min, max)
+	}
+	return v, nil
+}
+
+func parseNightVision(payload string) (int32, error) {
+	switch payload {
+	case "off":
+		return 0, nil
+	case "auto":
+		return 1, nil
+	case "on":
+		return 2, nil
+	default:
+		return 0, fmt.Errorf("expected off/auto/on, got %q", payload)
+	}
 }
