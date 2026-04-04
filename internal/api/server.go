@@ -56,7 +56,9 @@ const (
 	contentSecurityPolicy = "default-src 'self'; " +
 		"script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; " +
 		"style-src 'self' 'unsafe-inline'; " +
-		"connect-src 'self' ws: wss:; " +
+		"worker-src 'self' blob:; " +
+		"media-src 'self' blob:; " +
+		"connect-src 'self' ws: wss: https://cdn.jsdelivr.net; " +
 		"img-src 'self' data:; " +
 		"frame-ancestors 'none'"
 )
