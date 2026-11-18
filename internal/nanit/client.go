@@ -83,6 +83,13 @@ type CameraClient struct {
 	streamRetryMu   sync.Mutex
 	streamRetrying  bool
 	lastWinLocation atomic.Pointer[pb.Point]
+
+	// command confirmation (see confirm.go)
+	pendingMu        sync.Mutex
+	pending          map[int32]*trackedRequest
+	replay           []*trackedRequest
+	lastAckReconnect time.Time
+	lightState       atomic.Int32 // 0 unknown, 1 off, 2 on (as last reported by the camera)
 }
 
 func NewCameraClient(cameraUID, babyUID string, tokenMgr *TokenManager, rtmpURL string, sensorPollSec int) *CameraClient {
@@ -220,8 +227,11 @@ func (c *CameraClient) connect() error {
 		HandshakeTimeout: wsHandshakeTimeout,
 	}
 
-	conn, _, err := dialer.DialContext(ctx, url, header)
+	conn, resp, err := dialer.DialContext(ctx, url, header)
 	if err != nil {
+		if resp != nil {
+			return fmt.Errorf("websocket dial: %w (HTTP %d)", err, resp.StatusCode)
+		}
 		return fmt.Errorf("websocket dial: %w", err)
 	}
 
@@ -236,13 +246,14 @@ func (c *CameraClient) connect() error {
 		c.onConnect()
 	}
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	connDone := make(chan struct{})
 
-	c.wg.Add(3)
+	c.wg.Add(4)
 	go c.readLoop(conn, errCh)
 	go c.keepaliveLoop(conn, errCh)
 	go c.sensorPollLoop(connDone)
+	go c.ackWatchLoop(connDone, errCh)
 
 	if err := c.startStreaming(); err != nil {
 		log.Printf("[camera:%s] failed to start streaming: %v", c.cameraUID, err)
@@ -268,6 +279,7 @@ func (c *CameraClient) connect() error {
 			log.Printf("[camera:%s] init %s: %v", c.cameraUID, r.name, err)
 		}
 	}
+	c.resendUnconfirmed()
 
 	var result error
 	select {
@@ -276,6 +288,7 @@ func (c *CameraClient) connect() error {
 	}
 
 	close(connDone)
+	c.carryOverPending()
 	c.stopStreaming()
 	conn.Close()
 
@@ -401,6 +414,7 @@ func (c *CameraClient) handleRequest(req *pb.Request) {
 		}
 
 	case pb.RequestType_PUT_CONTROL:
+		c.observeControl(req.GetControl())
 		if c.onControl != nil && req.GetControl() != nil {
 			c.onControl(req.GetControl())
 		}
@@ -445,6 +459,7 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 	if resp == nil {
 		return
 	}
+	c.ackResponse(resp)
 
 	switch resp.GetRequestType() {
 	case pb.RequestType_GET_SENSOR_DATA:
@@ -563,33 +578,16 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 	}
 }
 
+// sendRequest sends a status or setup request. If it goes unanswered that is
+// logged, but it never forces a reconnect (see confirm.go).
 func (c *CameraClient) sendRequest(reqType pb.RequestType, populate func(*pb.Request)) error {
-	id := c.requestID.Add(1)
-	req := &pb.Request{
-		Id:   &id,
-		Type: reqType.Enum(),
-	}
-	if populate != nil {
-		populate(req)
-	}
+	return c.sendAttempt(reqType, populate, false, time.Time{}, 0)
+}
 
-	msg := &pb.Message{
-		Type:    pb.Message_REQUEST.Enum(),
-		Request: req,
-	}
-
-	data, err := proto.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
-	}
-
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
-	if c.conn == nil {
-		return fmt.Errorf("not connected")
-	}
-	_ = c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
-	return c.conn.WriteMessage(websocket.BinaryMessage, data)
+// sendCommand sends something the user asked for. If the camera does not
+// confirm it, the connection is re-established and it is re-sent once (see confirm.go).
+func (c *CameraClient) sendCommand(reqType pb.RequestType, populate func(*pb.Request)) error {
+	return c.sendAttempt(reqType, populate, true, time.Time{}, 0)
 }
 
 func (c *CameraClient) startStreaming() error {
@@ -735,7 +733,7 @@ func (c *CameraClient) enableSensorPush() error {
 }
 
 func (c *CameraClient) SetNightLight(on bool) error {
-	return c.sendRequest(pb.RequestType_PUT_CONTROL, func(req *pb.Request) {
+	return c.sendCommand(pb.RequestType_PUT_CONTROL, func(req *pb.Request) {
 		v := pb.Control_LIGHT_OFF
 		if on {
 			v = pb.Control_LIGHT_ON
@@ -745,7 +743,7 @@ func (c *CameraClient) SetNightLight(on bool) error {
 }
 
 func (c *CameraClient) SetNightLightTimeout(seconds int) error {
-	return c.sendRequest(pb.RequestType_PUT_CONTROL, func(req *pb.Request) {
+	return c.sendCommand(pb.RequestType_PUT_CONTROL, func(req *pb.Request) {
 		v := int32(seconds)
 		req.Control = &pb.Control{NightLightTimeout: &v}
 	})
