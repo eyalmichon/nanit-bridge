@@ -208,8 +208,9 @@ func startWithFakeCamera(t *testing.T, f *fakeCamera, ct confirmTiming) *CameraC
 	t.Cleanup(client.Stop)
 
 	_ = await(t, connected, 3*time.Second, "first connection")
-	// wait until the connection-setup requests have been answered
-	eventually(t, 2*time.Second, func() bool { return pendingCount(client) == 0 }, "setup requests answered")
+	// wait until the connection-setup requests were sent AND answered (or timed out).
+	// Right after OnConnect nothing has been sent yet, so "nothing pending" alone is true too early.
+	eventually(t, 2*time.Second, func() bool { return f.setupPutCount() >= 1 && pendingCount(client) == 0 }, "setup requests sent and settled")
 	return client
 }
 

@@ -3,6 +3,9 @@ package config
 import "testing"
 
 func TestLoadDefaults(t *testing.T) {
+	// keep the generated RTMP token out of /data (not writable in CI)
+	t.Setenv("NANIT_RTMP_TOKEN", "")
+	t.Setenv("NANIT_RTMP_TOKEN_FILE", t.TempDir()+"/rtmp_token")
 	t.Setenv("NANIT_RTMP_ADDR", "192.168.1.10:1935")
 	t.Setenv("NANIT_RTMP_PORT", "")
 	t.Setenv("NANIT_HTTP_PORT", "")
@@ -45,6 +48,9 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadOverrides(t *testing.T) {
+	// keep the generated RTMP token out of /data (not writable in CI)
+	t.Setenv("NANIT_RTMP_TOKEN", "")
+	t.Setenv("NANIT_RTMP_TOKEN_FILE", t.TempDir()+"/rtmp_token")
 	t.Setenv("NANIT_RTMP_ADDR", "10.0.0.1:11935")
 	t.Setenv("NANIT_RTMP_PORT", "11935")
 	t.Setenv("NANIT_HTTP_PORT", "18080")
@@ -80,6 +86,9 @@ func TestLoadOverrides(t *testing.T) {
 }
 
 func TestLoadMissingRTMPAddr(t *testing.T) {
+	// keep the generated RTMP token out of /data (not writable in CI)
+	t.Setenv("NANIT_RTMP_TOKEN", "")
+	t.Setenv("NANIT_RTMP_TOKEN_FILE", t.TempDir()+"/rtmp_token")
 	t.Setenv("NANIT_RTMP_ADDR", "")
 	_, err := Load()
 	if err == nil {
@@ -88,6 +97,9 @@ func TestLoadMissingRTMPAddr(t *testing.T) {
 }
 
 func TestLoadInvalidPorts(t *testing.T) {
+	// keep the generated RTMP token out of /data (not writable in CI)
+	t.Setenv("NANIT_RTMP_TOKEN", "")
+	t.Setenv("NANIT_RTMP_TOKEN_FILE", t.TempDir()+"/rtmp_token")
 	t.Setenv("NANIT_RTMP_ADDR", "127.0.0.1:1935")
 	t.Setenv("NANIT_RTMP_PORT", "bad")
 	if _, err := Load(); err == nil {
