@@ -21,6 +21,7 @@ import (
 	"nanit-bridge/internal/config"
 	"nanit-bridge/internal/nanit"
 	rtmpserver "nanit-bridge/internal/rtmp"
+	rtspserver "nanit-bridge/internal/rtsp"
 )
 
 //go:embed static/*
@@ -142,6 +143,7 @@ type Server struct {
 	version    string
 	manager    *baby.Manager
 	rtmpServer *rtmpserver.Server
+	rtspServer *rtspserver.Server
 	logBcast   *LogBroadcaster
 	auth       *authManager
 	nanitAuth  *nanitAuthManager
@@ -152,6 +154,12 @@ type Server struct {
 	mu      sync.Mutex
 	clients map[*wsClient]struct{}
 	httpSrv *http.Server
+}
+
+// SetRTSPServer attaches an optional RTSP server so token rotations and status
+// endpoints stay in sync with RTMP.
+func (s *Server) SetRTSPServer(srv *rtspserver.Server) {
+	s.rtspServer = srv
 }
 
 type wsClient struct {
@@ -713,7 +721,7 @@ func (s *Server) handleStreamFLV(w http.ResponseWriter, r *http.Request) {
 
 	muxer := flv.NewMuxer(w)
 	muxer.HasVideo = true
-	muxer.HasAudio = true
+	muxer.HasAudio = s.rtmpServer.HasAudio(uid)
 	if err := muxer.WriteFileHeader(); err != nil {
 		return
 	}
@@ -740,17 +748,35 @@ func (s *Server) handleStreamFLV(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) rtspURLTemplate() string {
+	if s.rtspServer == nil || !s.rtspServer.IsRunning() {
+		return ""
+	}
+	host := s.rtmpAddr
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = host[:i]
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	return fmt.Sprintf("rtsp://%s:%d/{token}/{uid}", host, s.rtspServer.Port())
+}
+
 func (s *Server) handleRTMPToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	token := s.rtmpServer.GetToken()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	resp := map[string]string{
 		"token":        token,
 		"url_template": fmt.Sprintf("rtmp://%s/{token}/{uid}", s.rtmpAddr),
-	})
+	}
+	if rtspTmpl := s.rtspURLTemplate(); rtspTmpl != "" {
+		resp["rtsp_url_template"] = rtspTmpl
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleRTMPTokenRegenerate(w http.ResponseWriter, r *http.Request) {
@@ -768,17 +794,24 @@ func (s *Server) handleRTMPTokenRegenerate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.rtmpServer.SetToken(newToken)
+	if s.rtspServer != nil {
+		s.rtspServer.SetToken(newToken)
+	}
 	if err := s.manager.SetRTMPToken(newToken); err != nil {
 		log.Printf("[api] manager restart after token regeneration failed: %v", err)
 		http.Error(w, "token saved but manager restart failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("[api] RTMP token regenerated")
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	log.Printf("[api] stream token regenerated")
+	resp := map[string]string{
 		"token":        newToken,
 		"url_template": fmt.Sprintf("rtmp://%s/{token}/{uid}", s.rtmpAddr),
-	})
+	}
+	if rtspTmpl := s.rtspURLTemplate(); rtspTmpl != "" {
+		resp["rtsp_url_template"] = rtspTmpl
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) buildBabyJSON(uid string, state *baby.State) babyJSON {

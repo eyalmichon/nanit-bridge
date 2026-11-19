@@ -117,4 +117,35 @@ func TestLoadInvalidPorts(t *testing.T) {
 	if _, err := Load(); err == nil {
 		t.Fatalf("expected invalid NANIT_SENSOR_POLL_SEC error")
 	}
+
+	t.Setenv("NANIT_SENSOR_POLL_SEC", "30")
+	t.Setenv("NANIT_RTSP_PORT", "bad")
+	if _, err := Load(); err == nil {
+		t.Fatalf("expected invalid NANIT_RTSP_PORT error")
+	}
+
+	t.Setenv("NANIT_RTSP_PORT", "8554")
+	t.Setenv("NANIT_STREAM_MODE", "bogus")
+	if _, err := Load(); err == nil {
+		t.Fatalf("expected invalid NANIT_STREAM_MODE error")
+	}
+}
+
+func TestLoadStreamModes(t *testing.T) {
+	t.Setenv("NANIT_RTMP_TOKEN", "")
+	t.Setenv("NANIT_RTMP_TOKEN_FILE", t.TempDir()+"/rtmp_token")
+	t.Setenv("NANIT_RTMP_ADDR", "")
+	t.Setenv("NANIT_STREAM_MODE", "webrtc")
+	t.Setenv("NANIT_RTSP_PORT", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() in webrtc mode without RTMP addr failed: %v", err)
+	}
+	if cfg.StreamMode != "webrtc" {
+		t.Fatalf("StreamMode = %q, want webrtc", cfg.StreamMode)
+	}
+	if cfg.RTSPPort != 8554 {
+		t.Fatalf("RTSPPort = %d, want 8554", cfg.RTSPPort)
+	}
 }

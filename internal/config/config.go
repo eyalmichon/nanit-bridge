@@ -20,6 +20,11 @@ type Config struct {
 	RTMPAddr string
 	RTMPPort int
 
+	// Stream ingest mode: "auto" (WebRTC with RTMP fallback), "webrtc", or "rtmp".
+	StreamMode string
+	// TCP port for the built-in RTSP server (0 disables RTSP).
+	RTSPPort int
+
 	MQTTBrokerURL string
 	MQTTUsername  string
 	MQTTPassword  string
@@ -80,11 +85,26 @@ func Load() (*Config, error) {
 	}
 	c.SensorPollSec = sensorPoll
 
-	if c.RTMPAddr == "" {
-		return nil, fmt.Errorf("NANIT_RTMP_ADDR is required (your LAN IP reachable by the camera, e.g. 192.168.1.100:1935)")
+	c.StreamMode = strings.ToLower(strings.TrimSpace(envOrDefault("NANIT_STREAM_MODE", "auto")))
+	switch c.StreamMode {
+	case "auto", "webrtc", "rtmp":
+	default:
+		return nil, fmt.Errorf("invalid NANIT_STREAM_MODE %q (expected auto, webrtc, or rtmp)", c.StreamMode)
 	}
-	if strings.EqualFold(c.RTMPAddr, "auto") {
-		return nil, fmt.Errorf("NANIT_RTMP_ADDR is still set to 'auto'; set it to your LAN IP (e.g. 192.168.1.100:1935)")
+
+	rtspPort, err := strconv.Atoi(envOrDefault("NANIT_RTSP_PORT", "8554"))
+	if err != nil || rtspPort < 0 {
+		return nil, fmt.Errorf("invalid NANIT_RTSP_PORT: %q", os.Getenv("NANIT_RTSP_PORT"))
+	}
+	c.RTSPPort = rtspPort
+
+	if c.StreamMode != "webrtc" {
+		if c.RTMPAddr == "" {
+			return nil, fmt.Errorf("NANIT_RTMP_ADDR is required (your LAN IP reachable by the camera, e.g. 192.168.1.100:1935)")
+		}
+		if strings.EqualFold(c.RTMPAddr, "auto") {
+			return nil, fmt.Errorf("NANIT_RTMP_ADDR is still set to 'auto'; set it to your LAN IP (e.g. 192.168.1.100:1935)")
+		}
 	}
 
 	c.RTMPTokenFile = envOrDefault("NANIT_RTMP_TOKEN_FILE", "/data/rtmp_token")
