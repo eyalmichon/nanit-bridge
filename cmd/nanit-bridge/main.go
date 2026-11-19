@@ -25,6 +25,7 @@ import (
 	"nanit-bridge/internal/mqtt"
 	"nanit-bridge/internal/nanit"
 	"nanit-bridge/internal/rtmp"
+	"nanit-bridge/internal/rtsp"
 )
 
 var version string
@@ -87,6 +88,14 @@ func main() {
 		log.Fatalf("rtmp server: %v", err)
 	}
 
+	var rtspServer *rtsp.Server
+	if cfg.RTSPPort > 0 {
+		rtspServer = rtsp.NewServer(cfg.RTSPPort, cfg.RTMPToken)
+		if err := rtspServer.Start(); err != nil {
+			log.Fatalf("rtsp server: %v", err)
+		}
+	}
+
 	var mqttPub *mqtt.Publisher
 	if cfg.MQTTBrokerURL != "" {
 		mqttPub, err = mqtt.NewPublisher(mqtt.Config{
@@ -103,6 +112,7 @@ func main() {
 	}
 
 	mgr := baby.NewManager(tokenMgr, cfg.RTMPAddr, cfg.RTMPToken, cfg.SensorPollSec, cfg.PushCredsFile, rtmpServer)
+	mgr.ConfigureStreaming(cfg.StreamMode, rtspServer)
 
 	if mqttPub != nil {
 		mqttPub.SetCommandHandler(func(babyUID, key, payload string) {
@@ -149,6 +159,7 @@ func main() {
 		cfg.RTMPTokenFile,
 		version,
 	)
+	apiServer.SetRTSPServer(rtspServer)
 
 	mgr.OnStateChange(func(babyUID string, state *baby.State) {
 		if mqttPub != nil {
@@ -171,7 +182,20 @@ func main() {
 	}
 
 	log.Printf("nanit-bridge is running")
-	log.Printf("  RTMP: rtmp://%s/%s/<baby_uid>", cfg.RTMPAddr, maskToken(cfg.RTMPToken))
+	log.Printf("  Stream mode: %s", cfg.StreamMode)
+	if rtspServer != nil {
+		rtspHost := cfg.RTMPAddr
+		if i := strings.LastIndex(rtspHost, ":"); i >= 0 {
+			rtspHost = rtspHost[:i]
+		}
+		if rtspHost == "" {
+			rtspHost = "0.0.0.0"
+		}
+		log.Printf("  RTSP: rtsp://%s:%d/%s/<baby_uid>", rtspHost, rtspServer.Port(), maskToken(cfg.RTMPToken))
+	}
+	if cfg.RTMPAddr != "" {
+		log.Printf("  RTMP: rtmp://%s/%s/<baby_uid>", cfg.RTMPAddr, maskToken(cfg.RTMPToken))
+	}
 	log.Printf("  Dashboard: http://0.0.0.0:%d", cfg.HTTPPort)
 	if cfg.MQTTBrokerURL != "" {
 		log.Printf("  MQTT: %s (prefix: %s)", cfg.MQTTBrokerURL, cfg.MQTTPrefix)
@@ -191,6 +215,9 @@ func main() {
 		log.Printf("api server shutdown error: %v", err)
 	}
 	mgr.Stop()
+	if rtspServer != nil {
+		rtspServer.Stop()
+	}
 	rtmpServer.Stop()
 }
 

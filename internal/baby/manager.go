@@ -14,6 +14,9 @@ import (
 
 	"nanit-bridge/internal/nanit"
 	pb "nanit-bridge/internal/nanit/nanitpb"
+	"nanit-bridge/internal/rtmp"
+	"nanit-bridge/internal/rtsp"
+	webrtcingest "nanit-bridge/internal/webrtc"
 )
 
 // StreamSubscriber provides read access to live RTMP streams.
@@ -33,6 +36,9 @@ type Manager struct {
 	pushReceiver  *nanit.PushReceiver
 	pushActive    bool
 	rtmpSub       StreamSubscriber
+	rtmpServer    *rtmp.Server
+	rtspServer    *rtsp.Server
+	streamMode    string
 	started       bool
 
 	lastStreamRestart map[string]time.Time
@@ -41,11 +47,16 @@ type Manager struct {
 }
 
 type ManagedBaby struct {
-	State  *State
-	client *nanit.CameraClient
+	State        *State
+	client       *nanit.CameraClient
+	webrtcIngest *webrtcingest.Ingest
 }
 
 func NewManager(tokenMgr *nanit.TokenManager, rtmpAddr string, rtmpToken string, sensorPollSec int, pushCredsFile string, rtmpSub StreamSubscriber) *Manager {
+	var rtmpSrv *rtmp.Server
+	if s, ok := rtmpSub.(*rtmp.Server); ok {
+		rtmpSrv = s
+	}
 	m := &Manager{
 		babies:            make(map[string]*ManagedBaby),
 		tokenMgr:          tokenMgr,
@@ -54,6 +65,8 @@ func NewManager(tokenMgr *nanit.TokenManager, rtmpAddr string, rtmpToken string,
 		sensorPollSec:     sensorPollSec,
 		stopCh:            make(chan struct{}),
 		rtmpSub:           rtmpSub,
+		rtmpServer:        rtmpSrv,
+		streamMode:        "rtmp",
 		lastStreamRestart: make(map[string]time.Time),
 	}
 
@@ -63,6 +76,17 @@ func NewManager(tokenMgr *nanit.TokenManager, rtmpAddr string, rtmpToken string,
 	}
 
 	return m
+}
+
+// ConfigureStreaming sets the stream ingest mode ("auto", "webrtc", or "rtmp")
+// and optional RTSP server used to republish WebRTC streams.
+func (m *Manager) ConfigureStreaming(mode string, rtspSrv *rtsp.Server) {
+	m.mu.Lock()
+	if mode != "" {
+		m.streamMode = mode
+	}
+	m.rtspServer = rtspSrv
+	m.mu.Unlock()
 }
 
 func (m *Manager) OnStateChange(fn func(string, *State)) {
@@ -147,6 +171,10 @@ func (m *Manager) Stop() {
 		go func(uid string, mb *ManagedBaby) {
 			defer wg.Done()
 			log.Printf("[manager] stopping baby %s", uid)
+			// Stop WebRTC ingest before closing the control socket so WebRtc.Close is delivered.
+			if mb.webrtcIngest != nil {
+				mb.webrtcIngest.Stop()
+			}
 			mb.client.Stop()
 		}(uid, mb)
 	}
@@ -314,7 +342,7 @@ func (m *Manager) RestartStream(babyUID string) {
 	m.mu.Lock()
 	mb, ok := m.babies[babyUID]
 	m.mu.Unlock()
-	if !ok {
+	if !ok || !mb.client.RTMPEnabled() {
 		return
 	}
 	mb.State.SetStreamState(StreamStopped)
@@ -426,10 +454,45 @@ func (m *Manager) SetRTMPToken(token string) error {
 }
 
 func (m *Manager) startBaby(b nanit.Baby) {
-	rtmpURL := fmt.Sprintf("rtmp://%s/%s/%s", m.rtmpAddr, m.rtmpToken, b.UID)
+	m.mu.Lock()
+	streamMode := m.streamMode
+	rtspSrv := m.rtspServer
+	rtmpSrv := m.rtmpServer
+	rtmpAddr := m.rtmpAddr
+	rtmpToken := m.rtmpToken
+	m.mu.Unlock()
+
+	rtmpURL := ""
+	if rtmpAddr != "" {
+		rtmpURL = fmt.Sprintf("rtmp://%s/%s/%s", rtmpAddr, rtmpToken, b.UID)
+	}
 
 	state := NewState(b.UID, b.CameraUID, b.Name)
 	client := nanit.NewCameraClient(b.CameraUID, b.UID, m.tokenMgr, rtmpURL, m.sensorPollSec)
+
+	useWebRTC := streamMode == "webrtc" || streamMode == "auto"
+	var ingest *webrtcingest.Ingest
+	if useWebRTC {
+		client.SetRTMPStreaming(false)
+		var onUnsupported func(error)
+		if streamMode == "auto" && rtmpURL != "" {
+			onUnsupported = func(err error) {
+				log.Printf("[manager] WebRTC unsupported for %s (%v), falling back to RTMP", b.UID, err)
+				client.SetRTMPStreaming(true)
+				client.RestartStreaming()
+			}
+		}
+		ingest = webrtcingest.NewIngest(webrtcingest.Config{
+			BabyUID:       b.UID,
+			Signaler:      client,
+			RTSPServer:    rtspSrv,
+			RTMPServer:    rtmpSrv,
+			OnStarting:    func() { state.SetStreamState(StreamStarting) },
+			OnActive:      func() { state.SetStreamState(StreamActive) },
+			OnStopped:     func() { state.SetStreamState(StreamStopped) },
+			OnUnsupported: onUnsupported,
+		})
+	}
 
 	client.OnSensor(func(update nanit.SensorUpdate) {
 		state.UpdateSensors(func(s *SensorState) {
@@ -503,6 +566,9 @@ func (m *Manager) startBaby(b nanit.Baby) {
 			}
 			if settings.SleepMode != nil {
 				c.SleepMode = settings.GetSleepMode()
+				if ingest != nil {
+					ingest.SetSleepMode(c.SleepMode)
+				}
 			}
 			if settings.NightVision != nil {
 				c.NightVision = int32(settings.GetNightVision())
@@ -574,10 +640,15 @@ func (m *Manager) startBaby(b nanit.Baby) {
 
 	client.OnConnect(func() {
 		state.SetWSAlive(true)
+		if ingest != nil {
+			ingest.NotifyConnected()
+		}
 	})
 	client.OnDisconnect(func() {
 		state.SetWSAlive(false)
-		state.SetStreamState(StreamStopped)
+		if client.RTMPEnabled() {
+			state.SetStreamState(StreamStopped)
+		}
 	})
 
 	if m.onStateChange != nil {
@@ -588,12 +659,16 @@ func (m *Manager) startBaby(b nanit.Baby) {
 
 	m.mu.Lock()
 	m.babies[b.UID] = &ManagedBaby{
-		State:  state,
-		client: client,
+		State:        state,
+		client:       client,
+		webrtcIngest: ingest,
 	}
 	m.mu.Unlock()
 
-	log.Printf("[manager] starting baby %s (camera: %s, name: %s)", b.UID, b.CameraUID, b.Name)
+	log.Printf("[manager] starting baby %s (camera: %s, name: %s, stream_mode: %s)", b.UID, b.CameraUID, b.Name, streamMode)
+	if ingest != nil {
+		ingest.Start()
+	}
 	client.Start()
 }
 
@@ -758,6 +833,9 @@ func (m *Manager) checkStreamHealth() {
 
 	now := time.Now()
 	for uid, mb := range snapshot {
+		if !mb.client.RTMPEnabled() {
+			continue
+		}
 		if !mb.State.IsWSAlive() {
 			continue
 		}

@@ -163,6 +163,82 @@ func (s *Server) HasStream(key string) bool {
 	return ok
 }
 
+// HasAudio returns true if the current publisher for key has announced an AAC audio track.
+func (s *Server) HasAudio(key string) bool {
+	s.mu.RLock()
+	b, ok := s.broadcasters[key]
+	s.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	b.mu.RLock()
+	has := b.aacConfig != nil
+	b.mu.RUnlock()
+	return has
+}
+
+// InternalPublisher lets in-process ingest pipelines (such as WebRTC) publish
+// AV packets directly into the RTMP/HTTP-FLV broadcaster without an external
+// TCP RTMP connection.
+type InternalPublisher struct {
+	server    *Server
+	key       string
+	b         *broadcaster
+	closeOnce sync.Once
+}
+
+// PublishInternal registers an in-process publisher for key, replacing any
+// previous broadcaster. Call Close when the stream ends.
+func (s *Server) PublishInternal(key string) *InternalPublisher {
+	b := newBroadcaster()
+
+	s.mu.Lock()
+	if old, ok := s.broadcasters[key]; ok {
+		go old.closeSubscribers()
+	}
+	s.broadcasters[key] = b
+	s.mu.Unlock()
+
+	log.Printf("[rtmp] internal publisher started: stream=%s", key)
+	return &InternalPublisher{
+		server: s,
+		key:    key,
+		b:      b,
+	}
+}
+
+// WritePacket caches codec configuration headers and broadcasts pkt to all subscribers.
+func (p *InternalPublisher) WritePacket(pkt av.Packet) {
+	switch pkt.Type {
+	case av.Metadata:
+		p.b.mu.Lock()
+		p.b.metadata = &pkt
+		p.b.mu.Unlock()
+	case av.AACDecoderConfig:
+		p.b.mu.Lock()
+		p.b.aacConfig = &pkt
+		p.b.mu.Unlock()
+	case av.H264DecoderConfig:
+		p.b.mu.Lock()
+		p.b.h264Config = &pkt
+		p.b.mu.Unlock()
+	}
+	p.b.broadcast(pkt)
+}
+
+// Close removes the internal publisher and closes its subscribers.
+func (p *InternalPublisher) Close() {
+	p.closeOnce.Do(func() {
+		p.server.mu.Lock()
+		if cur, ok := p.server.broadcasters[p.key]; ok && cur == p.b {
+			delete(p.server.broadcasters, p.key)
+		}
+		p.server.mu.Unlock()
+		p.b.closeSubscribers()
+		log.Printf("[rtmp] internal publisher stopped: stream=%s", p.key)
+	})
+}
+
 // Subscribe returns a packet channel for the given stream key, or nil if the
 // stream is not currently being published. Call unsubscribe when done.
 func (s *Server) Subscribe(key string) (packets <-chan av.Packet, unsubscribe func(), ok bool) {

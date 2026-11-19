@@ -80,9 +80,16 @@ type CameraClient struct {
 
 	done            chan struct{}
 	wg              sync.WaitGroup
+	rtmpEnabled     atomic.Bool
+	rtmpStarted     atomic.Bool
 	streamRetryMu   sync.Mutex
 	streamRetrying  bool
 	lastWinLocation atomic.Pointer[pb.Point]
+
+	// WebRTC signaling sessions (see webrtc.go)
+	webrtcMu       sync.Mutex
+	webrtcSessions map[int64]*webrtcSession
+	webrtcOffers   map[int32]*webrtcSession
 
 	// command confirmation (see confirm.go)
 	pendingMu        sync.Mutex
@@ -104,7 +111,24 @@ func NewCameraClient(cameraUID, babyUID string, tokenMgr *TokenManager, rtmpURL 
 		done:      make(chan struct{}),
 	}
 	c.sensorPollSec.Store(int32(sensorPollSec))
+	c.rtmpEnabled.Store(true)
 	return c
+}
+
+// SetRTMPStreaming controls whether the client automatically issues legacy
+// PUT_STREAMING (RTMP push) requests on connect and retries.
+func (c *CameraClient) SetRTMPStreaming(enabled bool) {
+	c.rtmpEnabled.Store(enabled)
+	if !enabled {
+		c.streamRetryMu.Lock()
+		c.streamRetrying = false
+		c.streamRetryMu.Unlock()
+	}
+}
+
+// RTMPEnabled reports whether legacy RTMP streaming is enabled on this client.
+func (c *CameraClient) RTMPEnabled() bool {
+	return c.rtmpEnabled.Load()
 }
 
 func (c *CameraClient) SetSensorPollInterval(seconds int) {
@@ -141,12 +165,24 @@ func (c *CameraClient) Stop() {
 	case <-c.done:
 		return
 	default:
+	}
+
+	// Best-effort stop of any active RTMP push while the socket is still open,
+	// so the camera releases its Mobile App streaming slot cleanly.
+	c.stopStreaming()
+	c.cancelWebRTCSessions()
+
+	select {
+	case <-c.done:
+		return
+	default:
 		close(c.done)
 	}
 
 	c.connMu.Lock()
 	if c.conn != nil {
 		c.conn.Close()
+		c.conn = nil
 	}
 	c.connMu.Unlock()
 
@@ -255,9 +291,11 @@ func (c *CameraClient) connect() error {
 	go c.sensorPollLoop(connDone)
 	go c.ackWatchLoop(connDone, errCh)
 
-	if err := c.startStreaming(); err != nil {
-		log.Printf("[camera:%s] failed to start streaming: %v", c.cameraUID, err)
-		c.scheduleStreamRetry()
+	if c.rtmpEnabled.Load() {
+		if err := c.startStreaming(); err != nil {
+			log.Printf("[camera:%s] failed to start streaming: %v", c.cameraUID, err)
+			c.scheduleStreamRetry()
+		}
 	}
 
 	initRequests := []struct {
@@ -290,6 +328,12 @@ func (c *CameraClient) connect() error {
 	close(connDone)
 	c.carryOverPending()
 	c.stopStreaming()
+
+	c.connMu.Lock()
+	if c.conn == conn {
+		c.conn = nil
+	}
+	c.connMu.Unlock()
 	conn.Close()
 
 	if c.onDisconnect != nil {
@@ -425,12 +469,18 @@ func (c *CameraClient) handleRequest(req *pb.Request) {
 		}
 
 	case pb.RequestType_PUT_STREAMING:
+		if !c.rtmpEnabled.Load() {
+			return
+		}
 		if c.onStreaming != nil && req.GetStreaming() != nil {
 			c.onStreaming(StreamingUpdate{
 				CameraUID: c.cameraUID,
 				Streaming: req.GetStreaming(),
 			})
 		}
+
+	case pb.RequestType_PUT_WEBRTC_SERVICE_MESSAGE:
+		c.handleWebRTCRequest(req.GetWebrtc())
 
 	case pb.RequestType_PUT_STING_STATUS:
 		if req.GetStingStatus() != nil {
@@ -536,7 +586,13 @@ func (c *CameraClient) handleResponse(resp *pb.Response) {
 			}
 		}
 
+	case pb.RequestType_PUT_WEBRTC_SERVICE_MESSAGE:
+		c.handleWebRTCResponse(resp)
+
 	case pb.RequestType_PUT_STREAMING:
+		if !c.rtmpEnabled.Load() {
+			return
+		}
 		if resp.GetStatusCode() == 200 {
 			c.streamRetryMu.Lock()
 			c.streamRetrying = false
@@ -591,6 +647,7 @@ func (c *CameraClient) sendCommand(reqType pb.RequestType, populate func(*pb.Req
 }
 
 func (c *CameraClient) startStreaming() error {
+	c.rtmpStarted.Store(true)
 	return c.sendRequest(pb.RequestType_PUT_STREAMING, func(req *pb.Request) {
 		started := pb.Streaming_STARTED
 		mobile := pb.StreamIdentifier_MOBILE
@@ -609,20 +666,18 @@ func (c *CameraClient) stopStreaming() {
 	c.streamRetrying = false
 	c.streamRetryMu.Unlock()
 
-	select {
-	case <-c.done:
-		return // shutting down, skip the network write
-	default:
+	if !c.rtmpStarted.Swap(false) || c.rtmpURL == "" {
+		return
 	}
 
-	empty := ""
+	url := c.rtmpURL
 	_ = c.sendRequest(pb.RequestType_PUT_STREAMING, func(req *pb.Request) {
 		stopped := pb.Streaming_STOPPED
 		mobile := pb.StreamIdentifier_MOBILE
 		req.Streaming = &pb.Streaming{
 			Id:      &mobile,
 			Status:  &stopped,
-			RtmpUrl: &empty,
+			RtmpUrl: &url,
 		}
 	})
 }
@@ -631,6 +686,9 @@ func (c *CameraClient) stopStreaming() {
 // The PUT_STREAMING response handler schedules the retry loop on failure,
 // so we only need to send the initial request here.
 func (c *CameraClient) RestartStreaming() {
+	if !c.rtmpEnabled.Load() {
+		return
+	}
 	log.Printf("[camera:%s] re-requesting stream", c.cameraUID)
 	if err := c.startStreaming(); err != nil {
 		log.Printf("[camera:%s] stream re-request failed: %v", c.cameraUID, err)

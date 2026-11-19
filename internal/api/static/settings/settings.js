@@ -193,6 +193,7 @@
   function renderStreamUrls() {
     if (!currentTokenData) return;
     var base = (currentTokenData.url_template || '').replace('{token}', currentTokenData.token || '');
+    var rtspBase = (currentTokenData.rtsp_url_template || '').replace('{token}', currentTokenData.token || '');
     rtmpTokenInput.value = currentTokenData.token || '';
 
     if (currentBabies.length === 0) {
@@ -200,15 +201,13 @@
       return;
     }
 
-    streamUrlList.innerHTML = '';
-    currentBabies.forEach(function(b) {
-      var url = base.replace('{uid}', b.uid);
+    function appendUrlRow(labelText, url) {
       var row = document.createElement('div');
       row.className = 'stream-url-row';
 
       var label = document.createElement('span');
       label.className = 'stream-url-name';
-      label.textContent = b.name || b.uid;
+      label.textContent = labelText;
       row.appendChild(label);
 
       var urlWrap = document.createElement('div');
@@ -229,6 +228,17 @@
 
       row.appendChild(urlWrap);
       streamUrlList.appendChild(row);
+    }
+
+    streamUrlList.innerHTML = '';
+    currentBabies.forEach(function(b) {
+      var name = b.name || b.uid;
+      if (rtspBase) {
+        appendUrlRow(name + ' (RTSP)', rtspBase.replace('{uid}', b.uid));
+      }
+      if (base) {
+        appendUrlRow(name + ' (RTMP)', base.replace('{uid}', b.uid));
+      }
     });
   }
 

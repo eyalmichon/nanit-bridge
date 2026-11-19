@@ -19,6 +19,6 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /nanit-bridge /nanit-bridge
 COPY --from=builder --chown=nonroot:nonroot /data /data
 
-EXPOSE 1935 8080
+EXPOSE 1935 8080 8554
 USER nonroot
 ENTRYPOINT ["/nanit-bridge"]
