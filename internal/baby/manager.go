@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Eyevinn/hi264/pkg/decoder"
@@ -34,7 +35,7 @@ type Manager struct {
 	sensorPollSec int
 	stopCh        chan struct{}
 	pushReceiver  *nanit.PushReceiver
-	pushActive    bool
+	pushActive    atomic.Bool
 	rtmpSub       StreamSubscriber
 	rtmpServer    *rtmp.Server
 	rtspServer    *rtsp.Server
@@ -100,7 +101,8 @@ func (m *Manager) Start() error {
 		return nil
 	}
 	m.started = true
-	m.stopCh = make(chan struct{})
+	stopCh := make(chan struct{})
+	m.stopCh = stopCh
 	m.mu.Unlock()
 
 	babies, err := m.tokenMgr.FetchBabies()
@@ -112,7 +114,7 @@ func (m *Manager) Start() error {
 		} else {
 			m.mu.Lock()
 			m.started = false
-			close(m.stopCh)
+			close(stopCh)
 			m.mu.Unlock()
 			return fmt.Errorf("fetch babies: %w", err)
 		}
@@ -131,18 +133,18 @@ func (m *Manager) Start() error {
 	if m.pushReceiver != nil {
 		if err := m.pushReceiver.Start(); err != nil {
 			log.Printf("[manager] FCM push receiver failed, falling back to REST polling: %v", err)
-			m.pushActive = false
-			go m.messagePollLoop()
+			m.pushActive.Store(false)
+			go m.messagePollLoop(stopCh)
 		} else {
 			log.Printf("[manager] using FCM push notifications for instant alerts")
-			m.pushActive = true
+			m.pushActive.Store(true)
 		}
 	} else {
-		m.pushActive = false
-		go m.messagePollLoop()
+		m.pushActive.Store(false)
+		go m.messagePollLoop(stopCh)
 	}
 
-	go m.streamWatchdogLoop()
+	go m.streamWatchdogLoop(stopCh)
 
 	return nil
 }
@@ -160,7 +162,7 @@ func (m *Manager) Stop() {
 	m.lastStreamRestart = make(map[string]time.Time)
 	m.mu.Unlock()
 
-	m.pushActive = false
+	m.pushActive.Store(false)
 	if m.pushReceiver != nil {
 		m.pushReceiver.Stop()
 	}
@@ -260,7 +262,7 @@ func (m *Manager) detectBabyPosition(babyUID string) (*nanit.BmmPatternPoint, er
 	}
 	log.Printf("[bmm:%s] captured frame: %d bytes", babyUID, len(framePNG))
 
-	irOn := mb.State.Sensors.IsNight
+	irOn := mb.State.Snapshot().Sensors.IsNight
 
 	return m.tokenMgr.GetBmmPatternLocation(babyUID, framePNG, irOn)
 }
@@ -410,7 +412,7 @@ func (m *Manager) GetSensorPollInterval(babyUID string) int {
 }
 
 func (m *Manager) IsPushActive() bool {
-	return m.pushActive
+	return m.pushActive.Load()
 }
 
 func (m *Manager) GetNotificationSettings(babyUID string) (nanit.NotificationSettings, error) {
@@ -726,25 +728,36 @@ const (
 	snapshotWaitTimeout    = 10 * time.Second
 )
 
-func (m *Manager) messagePollLoop() {
+func (m *Manager) messagePollLoop(stopCh <-chan struct{}) {
 	lastSeenID := make(map[string]int64)
 
-	// Initialize with current latest message IDs to avoid alerting on old messages.
+	// Snapshot baby UIDs under lock before making blocking HTTP calls.
 	m.mu.Lock()
+	initUIDs := make([]string, 0, len(m.babies))
 	for uid := range m.babies {
+		initUIDs = append(initUIDs, uid)
+	}
+	m.mu.Unlock()
+
+	// Initialize with current latest message IDs to avoid alerting on old messages.
+	for _, uid := range initUIDs {
+		select {
+		case <-stopCh:
+			return
+		default:
+		}
 		msgs, err := m.tokenMgr.FetchMessages(uid, 1)
 		if err == nil && len(msgs) > 0 {
 			lastSeenID[uid] = msgs[0].ID
 		}
 	}
-	m.mu.Unlock()
 
 	ticker := time.NewTicker(messagePollInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-m.stopCh:
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			m.mu.Lock()
@@ -803,9 +816,9 @@ func (m *Manager) messagePollLoop() {
 	}
 }
 
-func (m *Manager) streamWatchdogLoop() {
+func (m *Manager) streamWatchdogLoop(stopCh <-chan struct{}) {
 	select {
-	case <-m.stopCh:
+	case <-stopCh:
 		return
 	case <-time.After(streamWatchdogGrace):
 	}
@@ -815,7 +828,7 @@ func (m *Manager) streamWatchdogLoop() {
 
 	for {
 		select {
-		case <-m.stopCh:
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			m.checkStreamHealth()

@@ -117,13 +117,39 @@ func (a *authManager) writeHash(password string) error {
 	if err != nil {
 		return fmt.Errorf("bcrypt error: %w", err)
 	}
-	if dir := filepath.Dir(a.authFile); dir != "." {
+	dir := filepath.Dir(a.authFile)
+	if dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir auth dir: %w", err)
 		}
 	}
-	if err := os.WriteFile(a.authFile, hash, 0o600); err != nil {
-		return fmt.Errorf("write auth file: %w", err)
+	tmp, err := os.CreateTemp(dir, ".auth-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp auth file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("chmod temp auth file: %w", err)
+	}
+	if _, err := tmp.Write(hash); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write temp auth file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("sync temp auth file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close temp auth file: %w", err)
+	}
+	if err := os.Rename(tmpPath, a.authFile); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename auth file: %w", err)
 	}
 	return nil
 }

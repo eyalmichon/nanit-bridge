@@ -639,11 +639,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		send: make(chan []byte, 32),
 	}
 
-	s.mu.Lock()
-	s.clients[client] = struct{}{}
-	s.mu.Unlock()
-
-	// Send initial state snapshot.
+	// Populate initial state and buffered logs BEFORE registering in s.clients
+	// so BroadcastState cannot race to fill/close client.send before wsWriter starts.
 	states := s.manager.AllStates()
 	babies := make([]babyJSON, 0, len(states))
 	for uid, state := range states {
@@ -663,6 +660,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		})
 		client.send <- logInit
 	}
+
+	s.mu.Lock()
+	s.clients[client] = struct{}{}
+	s.mu.Unlock()
 
 	go s.wsWriter(client)
 	s.wsReader(client)

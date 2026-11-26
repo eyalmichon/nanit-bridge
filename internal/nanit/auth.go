@@ -118,9 +118,14 @@ func (tm *TokenManager) Context() context.Context {
 // Login performs initial email/password authentication.
 // Returns an MFA token if MFA is required.
 func (tm *TokenManager) Login() (mfaToken string, err error) {
+	tm.mu.RLock()
+	email := tm.session.Email
+	password := tm.password
+	tm.mu.RUnlock()
+
 	body := map[string]string{
-		"email":    tm.session.Email,
-		"password": tm.password,
+		"email":    email,
+		"password": password,
 	}
 
 	resp, err := tm.apiPost("/login", body)
@@ -155,9 +160,14 @@ func (tm *TokenManager) Login() (mfaToken string, err error) {
 
 // LoginWithMFA completes login with the MFA code.
 func (tm *TokenManager) LoginWithMFA(mfaToken, mfaCode string) error {
+	tm.mu.RLock()
+	email := tm.session.Email
+	password := tm.password
+	tm.mu.RUnlock()
+
 	body := map[string]string{
-		"email":     tm.session.Email,
-		"password":  tm.password,
+		"email":     email,
+		"password":  password,
 		"mfa_token": mfaToken,
 		"mfa_code":  mfaCode,
 	}
@@ -499,17 +509,51 @@ func (tm *TokenManager) save() {
 }
 
 func (tm *TokenManager) saveLocked() {
+	if tm.filePath == "" {
+		return
+	}
 	data, err := json.MarshalIndent(tm.session, "", "  ")
 	if err != nil {
 		log.Printf("[auth] warning: failed to marshal session: %v", err)
 		return
 	}
-	if err := os.MkdirAll(dirOf(tm.filePath), 0o700); err != nil {
+	dir := dirOf(tm.filePath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Printf("[auth] warning: failed to create session dir: %v", err)
 		return
 	}
-	if err := os.WriteFile(tm.filePath, data, 0o600); err != nil {
-		log.Printf("[auth] warning: failed to write session file: %v", err)
+	tmp, err := os.CreateTemp(dir, ".session-*.tmp")
+	if err != nil {
+		log.Printf("[auth] warning: failed to create temp session file: %v", err)
+		return
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		log.Printf("[auth] warning: failed to chmod temp session file: %v", err)
+		return
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		log.Printf("[auth] warning: failed to write temp session file: %v", err)
+		return
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		log.Printf("[auth] warning: failed to sync temp session file: %v", err)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		log.Printf("[auth] warning: failed to close temp session file: %v", err)
+		return
+	}
+	if err := os.Rename(tmpPath, tm.filePath); err != nil {
+		os.Remove(tmpPath)
+		log.Printf("[auth] warning: failed to rename session file: %v", err)
 	}
 }
 
