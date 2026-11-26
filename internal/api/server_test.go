@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"nanit-bridge/internal/baby"
 	"nanit-bridge/internal/nanit"
 	"nanit-bridge/internal/rtmp"
@@ -248,4 +250,56 @@ func TestServerStopGracefulShutdown(t *testing.T) {
 		_ = conn.Close()
 		t.Fatalf("expected server listener to be closed after Stop")
 	}
+}
+
+func TestHandleWSConcurrentBroadcastNoPanic(t *testing.T) {
+	s := newTestServer()
+	s.logBcast.Write([]byte("boot log line\n"))
+	ts := httptest.NewServer(http.HandlerFunc(s.handleWS))
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
+	st := baby.NewState("baby-1", "cam-1", "Leo")
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				s.BroadcastState("baby-1", st)
+			}
+		}
+	}()
+
+	for i := 0; i < 15; i++ {
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("dial ws #%d: %v", i, err)
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			_ = conn.Close()
+			close(stop)
+			wg.Wait()
+			t.Fatalf("read initial #%d: %v", i, err)
+		}
+		if !strings.Contains(string(raw), `"type":"initial"`) {
+			_ = conn.Close()
+			close(stop)
+			wg.Wait()
+			t.Fatalf("expected initial message first, got: %s", string(raw))
+		}
+		_ = conn.Close()
+	}
+
+	close(stop)
+	wg.Wait()
 }
